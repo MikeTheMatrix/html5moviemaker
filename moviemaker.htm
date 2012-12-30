@@ -10,9 +10,12 @@ window.onload = function(){
 	var characterCanvas = document.getElementById("character-canvas");
 	var sceneCanvas = document.getElementById("scene-canvas");
 	var controlsCanvas = document.getElementById("scene-controls");
-	movie = {id: 0, 
+	movie = {id: 0,
+		loading: false,
 		colors: ["#FFFFFF", "#808080", "#FF0000", "#FFFF00", 
               "#00FF00", "#00FFFF", "#0000FF", "#800080"],
+		instruments: ["#FFFFFF", "#FF0000", "#FFFF00", "#00FF00", "#0000FF", 
+		      "#FF8000", "#9E9E9E", "#00FFFF", "#800080", "#632DFF", "#63FF08"],
 		controls: {playButtonWidth: 40, 
 			  canvas: controlsCanvas,
 			  context: controlsCanvas.getContext("2d")
@@ -20,8 +23,10 @@ window.onload = function(){
 		scene: {length: 0,
 		  position: 0,
 		  dialog: {list: [], showingList: [], i: 0},
-		  soundtrack: {currentColor: 0, channels: []},
-		  paused: false,
+		  soundtrack: {sounds: [], soundAudios: [], playingSounds: [], 
+		    currentSound: -1, soundI: 0, playList: [],
+		    currentColor: 0, channels: [], fresh: true},
+		  paused: true,
 		  mode: "VIEW",
 		  canvas: sceneCanvas, 
 		  context: sceneCanvas.getContext("2d"),
@@ -31,7 +36,8 @@ window.onload = function(){
 		character: {current: -1,
 		  list: [], 
 		  currentColor: 0,
-		  drawingCharacter: {paths: []},
+		  drawingCharacter: {paths: [], actions: []},
+		  x: -1, y: -1, 
 		  canvas: characterCanvas,
 		  centerX: characterCanvas.clientWidth/2,
 		  centerY: characterCanvas.clientHeight/2,
@@ -43,6 +49,8 @@ window.onload = function(){
 	};
 	characterCanvas.getContext("2d").lineWidth = 6;
 //	movie.scene.context.lineWidth = 6;
+	movie.scene.context.shadowColor = "black";
+
 	var tool = new tool_pencil();	
 	characterCanvas.addEventListener("mousedown", tool.mousedown, false);
 	characterCanvas.addEventListener("mousemove", tool.mousemove, false);
@@ -52,6 +60,7 @@ window.onload = function(){
 	characterCanvas.addEventListener("touchend",   tool.touchend, false);
 
 	var tool2 = new tool_pencil2();	
+	sceneCanvas.addEventListener("mouseout", tool2.mouseout, false);
 	sceneCanvas.addEventListener("mousedown", tool2.mousedown, false);
 	sceneCanvas.addEventListener("mousemove", tool2.mousemove, false);
 	sceneCanvas.addEventListener("mouseup",   tool2.mouseup, false);
@@ -69,10 +78,10 @@ window.onload = function(){
 
 	setupAudio();
 
-	//if (window.location.search.length > 0){
 	try {
 		var search = window.location.search.search("id=");
 		if (search > 0){
+			movie.loading = true;
 			var id = window.location.search.substring(search + 3);
 			var xhr = new XMLHttpRequest();
 			xhr.open("GET", "/a?id=" + id, true);
@@ -84,22 +93,24 @@ window.onload = function(){
 						movie.id = id;
 						playButton();
 					}
+					else {
+						editButton();
+					}
+					movie.loading = false;
 				}
 			}
 			xhr.send();
 		}
 		else {
 			editButton();
-			setTheScene();
 		}
 	}
 	catch (e) {
+		movie.loading = false;
 		editButton();
-		setTheScene();
 	}
-	//}
 
-	drawControls();
+	animate();
 }
 
 
@@ -161,7 +172,6 @@ function tool_pencil () {
 		if (tool.started) {
 
 			context.lineTo(x, y);
-//			context.moveTo(x, y);
 			context.stroke();
 			movie.character.drawingCharacter.paths[tool.drawnPaths].pxdata[tool.drawnSegments] = [x, y];
 			tool.drawnSegments++;
@@ -219,19 +229,17 @@ function tool_pencil2 () {
 	this.start = function(x, y){
 		tool.started = true;
 		if (movie.scene.mode == "CHARACTERS"){
+			movie.character.x = -1;
+			movie.character.y = -1;
 			if (!currentCharacter()){
 				tool.started = false;
 				return;
 			}
 
-			var time = 0;
+			var time = movie.scene.position;
 			movie.recordPastPlay = true;
-			if (!movie.scene.animating){
-				time = movie.scene.position;
+			if (movie.scene.paused){
 				resume();
-			}
-			else {
-				time = (new Date).getTime() - movie.scene.started;
 			}
 			currentCharacter().recordingStarted = time;
 			var actions = movie.character.list[movie.character.current].actions;
@@ -248,14 +256,10 @@ function tool_pencil2 () {
 
 		}
 		else if (movie.scene.mode == "DIALOG"){
-			var time;
+			var time = movie.scene.position;
 			movie.recordPastPlay = true;
-			if (!movie.scene.animating){
-				time = movie.scene.position;
+			if (movie.scene.paused){
 				resume();
-			}
-			else {
-				time = (new Date).getTime() - movie.scene.started;
 			}
 			tool.loopCounter = (new Date).getTime() - time;
 			var text = document.getElementById("dialog-input").value;
@@ -272,6 +276,19 @@ function tool_pencil2 () {
 		x = ev.pageX - movie.scene.canvasOffsetLeft;
 		y = ev.pageY - movie.scene.canvasOffsetTop;
 		tool.move(x, y);
+		if (!tool.started && movie.scene.mode == "CHARACTERS" && currentCharacter()){
+			if (!currentCharacter().actions || currentCharacter().actions.length == 0){
+				movie.character.x = x;
+				movie.character.y = y;
+			}
+		}
+	}
+	this.mouseout = function (ev) {
+		x = ev.pageX - movie.character.canvasOffsetLeft;
+		y = ev.pageY - movie.character.canvasOffsetTop;
+		tool.move(x, y);
+		movie.character.x = -1;
+		movie.character.y = -1;
 	}
 
 	this.move = function(x, y){
@@ -310,7 +327,7 @@ function tool_pencil2 () {
 				movie.recordPastPlay = false;
 
 				setTimeout(function(){
-					if (!movie.scene.animating){
+					if (movie.scene.paused){
 						playButton();
 					}
 				}, 20);
@@ -321,7 +338,7 @@ function tool_pencil2 () {
 				tool.dialog.data[tool.dialog.data.length] = [-1, -1, (new Date).getTime() - tool.loopCounter];
 				movie.recordPastPlay = false;
 				setTimeout(function(){
-					if (!movie.scene.animating){
+					if (movie.scene.paused){
 						playButton();
 					}
 				}, 20);
@@ -334,53 +351,92 @@ function tool_pencil2 () {
 }
 
 function soundtrackStartTouch(x, y, tool){
-	var time;
+	var time = movie.scene.position;
+	var strack = movie.scene.soundtrack;
 	movie.recordPastPlay = true;
-	if (!movie.scene.animating){
-		time = movie.scene.position;
+	if (movie.scene.paused){
 		resume();
 	}
-	else {
-		time = (new Date).getTime() - movie.scene.started;
-	}
 	tool.loopCounter = (new Date).getTime() - time;
-
-	tool.channel = {instrument: movie.scene.soundtrack.currentColor, data: [[x, y, time]], i: 0};
-	movie.scene.soundtrack.channels[movie.scene.soundtrack.channels.length] = tool.channel;
-	movie.scene.soundtrack.channels.sort(function(a,b){return a.data[0][2] - b.data[0][2]})
-
-	if (movie.audio){
-		var chan = makeChannel(movie.scene.soundtrack.currentColor);
-		var freq = makeFreq(y) ;
-		var panX = makePan(x);
-		chan.osc.frequency.value = freq;
-		chan.panner.setPosition(panX, 0, 0);
-		chan.data[0] = {"freq": freq, "pan":panX};
-		movie.audio.channels[movie.audio.channels.length] = chan;
-		tool.audioChan = chan;
+	if (strack.currentSound > -1){
+		strack.sounds[strack.currentSound].data[strack.sounds[strack.currentSound].data.length] =
+			[time, -1];
+		strack.soundAudios[strack.currentSound].play();
 	}
+	else {
+		var wasFresh = movie.scene.soundtrack.fresh; 
+		if (movie.scene.soundtrack.fresh){
+			tool.channel = {instrument: movie.scene.soundtrack.currentColor, data: [], i: 0};
+			movie.scene.soundtrack.channels[movie.scene.soundtrack.channels.length] = tool.channel;
+			movie.scene.soundtrack.fresh = false;
+			if (movie.audio){
+				var chan = makeChannel(movie.scene.soundtrack.currentColor);
+				movie.audio.channels[movie.audio.channels.length] = chan;
+				tool.audioChan = chan;
+			}
+		}
+		else {
+			if (movie.audio){
+				tool.audioChan.gain.gain.value = tool.audioChan.defaultGain;
+				tool.audioChan.recording = true;
+			}
+		}
+		if (movie.audio){
+			var freq = makeFreq(y) ;
+			var panX = makePan(x);
+			tool.audioChan.osc.frequency.value = freq;
+			tool.audioChan.panner.setPosition(panX, 0, 0);
+			tool.audioChan.data[tool.audioChan.data.length] = {"freq": freq, "pan":panX, "time":time};		
+		}
+		tool.channel.data[tool.channel.data.length] = [x, y, time];
+		if (wasFresh){
+			movie.scene.soundtrack.channels.sort(function(a,b){return a.data[0][2] - b.data[0][2]});
+			if (movie.audio){
+				movie.audio.channels.sort(function(a,b){return a.data[0].time - b.data[0].time});
+			}
+		}
+	}
+	tool.t = (new Date).getTime();
 }
 function soundtrackTouchMove(x, y, tool){
-	tool.channel.data[tool.channel.data.length] = [x, y, (new Date).getTime() - tool.loopCounter];
-	if (movie.audio){
-		var freq = makeFreq(y) ;
-		var panX = makePan(x);
-		tool.audioChan.osc.frequency.setValueAtTime(freq, 0);
-		tool.audioChan.panner.setPosition(panX, 0, 0);
-		tool.audioChan.data[tool.audioChan.data.length] = {"freq": freq, "pan":panX};
+	if (movie.scene.soundtrack.currentSound > -1){
+	}
+	else {
+		if (movie.audio){
+			var freq = makeFreq(y) ;
+			var panX = makePan(x);
+			tool.audioChan.osc.frequency.setValueAtTime(freq, 0);
+			tool.audioChan.panner.setPosition(panX, 0, 0);
+			tool.audioChan.data[tool.audioChan.data.length] = {"freq": freq, "pan":panX};
+		}
+		tool.channel.data[tool.channel.data.length] = [x, y, (new Date).getTime() - tool.loopCounter];
 	}
 }
 function soundtrackTouchEnd(tool){
-	tool.channel.data[tool.channel.data.length] = [-1, -1, (new Date).getTime() - tool.loopCounter];
-	if (movie.audio){
-		tool.audioChan.gain.gain.value = 0;
-		tool.audioChan.data[tool.audioChan.data.length] = {"freq": -1, "pan": -1};
-		tool.audioChan.recording = false;
+	var strack = movie.scene.soundtrack;
+	if (strack.currentSound > -1){
+		var clickTime = (new Date).getTime() - tool.t;		
+		if (clickTime < 125){
+			movie.scene.length = Math.max(movie.scene.length, 
+					movie.scene.position + (strack.soundAudios[strack.currentSound].duration * 1000));
+		}
+		else {
+			strack.sounds[strack.currentSound].data[strack.sounds[strack.currentSound].data.length - 1][1] =
+				(new Date).getTime() - tool.loopCounter;
+			strack.soundAudios[strack.currentSound].pause();			
+		}
 	}
-
+	else {
+		if (movie.audio){
+			tool.audioChan.gain.gain.value = 0;
+			tool.audioChan.data[tool.audioChan.data.length] = {"freq": -1, "pan": -1};
+			tool.audioChan.recording = false;
+		}
+		tool.channel.data[tool.channel.data.length] = [-1, -1, (new Date).getTime() - tool.loopCounter];
+	}
 	movie.recordPastPlay = false;
 	setTimeout(function(){
-		if (!movie.scene.animating){
+		if (movie.scene.paused){
 			playButton();
 		}
 	}, 20);
@@ -446,9 +502,6 @@ function tool_pencil3 () {
 			movie.scene.started = (new Date).getTime() - newPosition;
 			movie.scene.position = newPosition;
 			movie.updateIs = true;
-			if (!movie.scene.animating){
-				animate();
-			}
 		}
 	};
 
@@ -460,9 +513,7 @@ function tool_pencil3 () {
 			movie.scene.started = (new Date).getTime() - newPosition;
 			movie.scene.position = newPosition;
 			movie.updateIs = true;
-			if (!movie.scene.animating){
-				animate();
-			}
+			movie.scene.soundtrack.fresh = true;
 		}
 	};
 
@@ -471,6 +522,7 @@ function tool_pencil3 () {
 			playButton();
 		}
 		else if (tool.started == 2){
+			movie.scene.soundtrack.fresh = true;
 			if (x < movie.controls.playButtonWidth){
 				if (!tool.wasPaused){
 					movie.scene.paused = false;
@@ -484,9 +536,6 @@ function tool_pencil3 () {
 				movie.scene.position = newPosition;
 				movie.updateIs = true;
 				movie.scene.paused = tool.wasPaused;
-				if (movie.scene.paused){
-					animate();
-				}
 			}
 		}
 		tool.started = 0;
@@ -501,28 +550,34 @@ function play(){
 			movie.character.list[ia].i = 0;
 			movie.character.list[ia].spriteI = 0;
 			movie.character.list[ia].currentSprite = 0;
+			turnOnSprite(0);
 		}
 	}
-	if (movie.audio){
-		for (var ia = 0; ia < movie.audio.channels.length; ia++){
-			movie.audio.channels[ia].i = 0;
+	for (var ia = 0; ia < movie.scene.soundtrack.channels.length; ia++){
+		movie.scene.soundtrack.channels[ia].i = 0;
+	}
+	for (var is = 0; is < movie.scene.soundtrack.sounds.length; is++){
+		if (movie.scene.soundtrack.soundAudios[is].currentTime > 0){
+			movie.scene.soundtrack.soundAudios[is].currentTime = 0;
 		}
-	}	
+		for (var iis = 0; iis < movie.scene.soundtrack.sounds[is].data.length; iis++){
+			movie.scene.soundtrack.playList[movie.scene.soundtrack.playList.length] = {"sound": is, 
+				"start": movie.scene.soundtrack.sounds[is].data[iis][0], 
+				"stop": movie.scene.soundtrack.sounds[is].data[iis][1]};
+		}
+	}
+	movie.scene.soundtrack.soundI = 0;
 	movie.scene.dialog.showingList = [];
 	movie.scene.dialog.i = 0;
 	movie.scene.started = (new Date).getTime() + 3000;
-	movie.scene.animating = true;
-	animate();
+	movie.scene.paused = false;
 }
 function resume(){
-	movie.scene.paused = false;
 	movie.scene.started = (new Date).getTime() - movie.scene.position;
-	movie.scene.animating = true;
-	animate();
-
+	movie.scene.paused = false;
+	movie.scene.soundtrack.fresh = true;
 }
 function pause(){
-	movie.scene.animating = false;
 	movie.scene.paused = true;
 }
 
@@ -538,7 +593,15 @@ function animate(){
 		movie.scene.position = nowInLoop;
 	}
 
-	if (nowInLoop < 0){
+	if (movie.character.x > -1){
+		drawCharacterWithSelection(currentCharacter(), 
+			movie.character.x, movie.character.y, movie.scene.context);
+	}
+
+	if (movie.loading){
+		drawLoading();
+	}
+	else if (nowInLoop < 0){
 		drawCountIn(Math.abs(nowInLoop/1000));
 	}
 	else {	
@@ -548,17 +611,15 @@ function animate(){
 				char.i = 0;
 				char.spriteI = 0;
 				char.currentSprite = 0;
-				if (ic == movie.character.current){
+				if (char.sprites && ic == movie.character.current){
 					turnOnSprite(0);
 				}
 			}
 			movie.scene.dialog.showingList = [];
 			movie.scene.dialog.i = 0;
-			if (movie.audio){
-				for (var ia = 0; ia < movie.audio.channels.length; ia++){
-					movie.audio.channels[ia].i = 0;
-				}
-			}	
+			for (var ia = 0; ia < movie.scene.soundtrack.channels.length; ia++){
+				movie.scene.soundtrack.channels[ia].i = 0;
+			}
 			movie.updateIs = false;
 		}
 		for (var ic = 0; ic < movie.character.list.length; ic++){
@@ -567,7 +628,7 @@ function animate(){
 			if (char.actions.length > 0){
 				var pxdata = char.actions;
 				while (char.sprites && char.spriteI < char.spriteChanges.length && 
-					char.spriteChanges[char.spriteI][1] < nowInLoop){
+					char.spriteChanges[char.spriteI][1] <= nowInLoop){
 					char.currentSprite = char.spriteChanges[char.spriteI][0];
 					if (ic == movie.character.current){
 						turnOnSprite(char.currentSprite);
@@ -591,20 +652,24 @@ function animate(){
 			dialogs.i++;
 		}
 		for (var idlg = 0; idlg < dialogs.showingList.length; idlg++){
-			var iii = dialogs.showingList[idlg].i + 1 ;
-			while (iii < dialogs.showingList[idlg].data.length 
-					&& dialogs.showingList[idlg].data[iii][2] < nowInLoop){
-				iii++;
-				dialogs.showingList[idlg].i++;
+			var dlg = dialogs.showingList[idlg];
+			while (dlg.i+1 < dlg.data.length && dlg.data[dlg.i+1][2] < nowInLoop){
+				dlg.i++;
 			}
-			drawDialog(dialogs.showingList[idlg]);
+			if (dlg.i < dlg.data.length && dlg.data[dlg.i][0] == -1){
+				dialogs.showingList.splice(idlg, 1);
+				idlg--;
+			}
+			else {
+				drawDialog(dialogs.showingList[idlg]);	
+			}
 		}
 		if (nowInLoop > movie.scene.length){
 			if (movie.recordPastPlay){
 				movie.scene.length = movie.scene.position;
 			}
 			else {
-				movie.scene.animating = false;
+				movie.scene.paused = true; 
 				if (movie.scene.mode == "VIEW"){
 					document.getElementById("after-show").style.visibility = "visible";
 				}
@@ -612,38 +677,74 @@ function animate(){
 		}
 	}
 	drawControls();
-	if (movie.audio){
-		updateAudioChannels(nowInLoop);
-	}
-	if (movie.scene.animating){
-		requestAnimFrame(function() {
-			animate();
-		});
-	}
+	updateAudioChannels(nowInLoop);
+
+	requestAnimFrame(function() {
+		animate();
+	});
 }
 
 function updateAudioChannels(nowInLoop){
-	for (var ic = 0; ic < movie.scene.soundtrack.channels.length; ic++){
-		var chan = movie.scene.soundtrack.channels[ic];
-		var achan = movie.audio.channels[ic];
-		if (!movie.scene.animating){
-			achan.gain.gain.value = 0;
+	var strack = movie.scene.soundtrack;
+	if (movie.scene.paused){ 
+		for (var is = 0; is < strack.sounds.length; is++){
+			strack.soundAudios[is].pause();
 		}
-		else if (!achan.recording){
-			while (achan.i < chan.data.length && chan.data[achan.i][2] < nowInLoop){
-				
-				if (achan.data[achan.i].freq == -1){
+	}
+	else if (strack.soundI < strack.playList.length && strack.playList[strack.soundI].start < nowInLoop){
+		var aa = strack.soundAudios[strack.playList[strack.soundI].sound];
+		var makePlay = function(){
+			if (aa.readyState == 4){
+				aa.currentTime = 0;
+				aa.play();
+				strack.playingSounds[strack.playingSounds.length] = {"audio": aa, 
+						"stop": strack.playList[strack.soundI].stop};
+				strack.soundI++;				
+			}
+			else {
+				setTimeout(makePlay, 250);
+			}
+		};
+		makePlay();
+	}
+	for (var it = 0; it < strack.playingSounds.length; it++){
+		if (strack.playingSounds[it].stop < nowInLoop){
+			strack.playingSounds[it].audio.pause();
+			strack.playingSounds[it].audio.currentTime = 0;
+			strack.playingSounds.splice(it, 1);
+			it--;
+		}
+	}
+	if (movie.audio){
+		for (var ic = 0; ic < movie.scene.soundtrack.channels.length; ic++){
+			var chan = movie.scene.soundtrack.channels[ic];
+			var achan = movie.audio.channels[ic];
+			var ci = chan.i;
+			var coord = {x: -1, y: -1};
+			if (movie.scene.paused){ 
+				achan.gain.gain.value = 0;
+			}
+			else if (!achan.recording){
+				while (ci < chan.data.length && chan.data[ci][2] < nowInLoop){
+					if (achan.data[ci].freq == -1){
+						achan.gain.gain.value = 0;
+					}
+					else {
+						achan.gain.gain.value = achan.defaultGain;
+						achan.osc.frequency.setValueAtTime(achan.data[ci].freq, 0);
+						achan.panner.setPosition(achan.data[ci].pan, 0, 0);
+					}
+					chan.i++;
+					ci++;
+				}
+				if (movie.scene.mode == "SOUNDTRACK" && ci > 0 && 
+						ci-1 < chan.data.length && chan.data[ci-1][0] > -1){
+					movie.scene.context.fillStyle = movie.instruments[chan.instrument];
+					movie.scene.context.fillRect(chan.data[ci-1][0], chan.data[ci-1][1], 20, 20);
+				}
+				if (ci == chan.data.length || ci == 0){
 					achan.gain.gain.value = 0;
 				}
-				else {
-					achan.gain.gain.value = achan.defaultGain;
-					achan.osc.frequency.setValueAtTime(achan.data[achan.i].freq, 0);
-					achan.panner.setPosition(achan.data[achan.i	].pan, 0, 0);
-				}
-				achan.i++;
-			}
-			if (achan.i == chan.data.length || achan.i == 0){
-				achan.gain.gain.value = 0;
 			}
 		}
 	}
@@ -655,12 +756,35 @@ function drawDialog(dlg){
 		context.fillStyle = "white";
 		context.lineWidth = 1;
 		context.strokeStyle = "black";
-		context.font = "13pt Arial Black";
+		context.font = "20pt Arial Black";
 		var tw = context.measureText(dlg.text).width;
-		context.fillRect(-5 + dlg.data[dlg.i][0] - tw / 2, dlg.data[dlg.i][1]-30, tw+ 10, 50);
-		context.strokeRect(-5 + dlg.data[dlg.i][0] - tw / 2, dlg.data[dlg.i][1]-30, tw + 10, 50);
+		var x = Math.max(-10 + dlg.data[dlg.i][0] - tw/2, 0);
+		var y = dlg.data[dlg.i][1] - 35;
+		var r = 5;
+		var h = 50;
+		var w = tw + 20;
+		var xdiff = movie.scene.canvas.width - (x + w);
+		if (xdiff < 0){
+			x = x + xdiff;
+		}
+		context.beginPath();
+		context.moveTo(x + r, y);
+		context.arcTo(x+w, y, x+w, y+h, r);
+		context.arcTo(x+w, y+h, x, y+h, r);
+		context.arcTo(x, y+h, x, y, r);
+		context.arcTo(x, y, x+w, y, r);
+		context.shadowBlur = 10;
+		context.shadowOffsetX = 10;
+		context.shadowOffsetY = 10;
+		context.closePath();
+		context.fill();
+		context.shadowOffsetX = 0;
+		context.shadowOffsetY = 0;
+		context.shadowBlur = 0;
+		context.stroke();
+
 		context.fillStyle = "black";
-		context.fillText(dlg.text, dlg.data[dlg.i][0] - tw / 2, dlg.data[dlg.i][1]);
+		context.fillText(dlg.text, x + 10, dlg.data[dlg.i][1]);
 	}
 }
 	
@@ -668,7 +792,7 @@ function drawControls(){
 	var ctx = movie.controls.context;
 	var playWidth = movie.controls.playButtonWidth;
 	var cHeight = movie.controls.canvas.height;
-	ctx.shadowBlur = 10;
+	ctx.shadowBlur = 2;
 	ctx.shadowColor = "black";
 
 	ctx.clearRect(0, 0, movie.controls.canvas.width, movie.controls.canvas.height);	
@@ -676,16 +800,17 @@ function drawControls(){
 	ctx.fillRect(0, 0, movie.controls.playButtonWidth, movie.controls.canvas.height);
 	ctx.fillStyle = "black";
 	ctx.strokeStyle = "black";
-	if (movie.scene.animating){
-		ctx.fillRect(playWidth * 0.175, cHeight * 0.25, playWidth * 0.25, cHeight * 0.5);
-		ctx.fillRect(playWidth * 0.575, cHeight * 0.25, playWidth * 0.25, cHeight * 0.5);	}
-	else {
+	if (movie.scene.paused){
 		ctx.beginPath();
 		ctx.moveTo(playWidth * 0.25, movie.controls.canvas.height * 0.25);
 		ctx.lineTo(playWidth * 0.25, movie.controls.canvas.height * 0.75);
 		ctx.lineTo(playWidth * 0.75, movie.controls.canvas.height * 0.5);
 		ctx.closePath();
 		ctx.fill();
+	}	
+	else {
+		ctx.fillRect(playWidth * 0.175, cHeight * 0.25, playWidth * 0.25, cHeight * 0.5);
+		ctx.fillRect(playWidth * 0.575, cHeight * 0.25, playWidth * 0.25, cHeight * 0.5);	
 	}
 
 	var newPosition = movie.controls.canvas.clientWidth - (movie.controls.playButtonWidth * 2);
@@ -693,8 +818,10 @@ function drawControls(){
 	newPosition += movie.controls.playButtonWidth;
 	newPosition = Math.min(newPosition, movie.controls.canvas.width - movie.controls.playButtonWidth);
 	if (newPosition > playWidth){
-		movie.controls.context.fillStyle = "yellow";
-		movie.controls.context.fillRect(newPosition, 0, movie.controls.playButtonWidth, movie.controls.canvas.height);
+		ctx.shadowBlur = 10;
+		ctx.fillStyle = "yellow";
+		ctx.fillRect(newPosition, 0, movie.controls.playButtonWidth, movie.controls.canvas.height);
+		ctx.strokeRect(newPosition, 0, movie.controls.playButtonWidth, movie.controls.canvas.height);
 	}
 //	movie.controls.context.fillStyle = "black";
 //	movie.controls.context.font = "6pt";
@@ -704,16 +831,22 @@ function drawControls(){
 
 function addCharacter(template){
 	turnOffCharacters();
+	var ic = movie.character.list.length;
 	if (template){
-		movie.character.list[movie.character.list.length] = template;
+		movie.character.list[ic] = template;
 	}
 	else {
-		movie.character.list[movie.character.list.length] = movie.character.drawingCharacter;
+		movie.character.list[ic] = movie.character.drawingCharacter;
 	}
-	movie.character.current++;
+	movie.character.list[ic].i = 0;
+	movie.character.current = ic;
 	clearCharacterCanvas();
 	document.getElementById("draw-characters").style.visibility = "hidden";
-	makeCharacterButton(movie.character.current);
+	var newCanvas = makeCharacterButton(ic);
+	drawCharacter(movie.character.list[ic], 
+			newCanvas.width / 2, newCanvas.height, newCanvas.getContext("2d"));
+
+	loadSprites(movie.character.current);
 	
 }
 function addCharacterFromFile(template){
@@ -727,23 +860,36 @@ function addCharacterFromFile(template){
 			src = template;
 		}
 	}
+
+	turnOffCharacters();
+
+	var charI = movie.character.list.length;
+	movie.character.current = charI;
+	movie.character.list[charI] = 
+		{sprites: [], currentSprite:0, spriteI:0, spriteChanges: [],
+			i:0, actions:[],
+			centerX: 0, 
+			centerY: 0,
+			"src":src};
+	var newCanvas = makeCharacterButton(charI);
+
 	img.src = src;
 	img.onload = function(){
-		turnOffCharacters();
+		
+		movie.character.list[charI].sprites = [img];
+		movie.character.list[charI].centerX = img.width / 2; 
+		movie.character.list[charI].centerY = img.height / 2;
 
-		var charI = movie.character.list.length;
-		movie.character.current = charI;
-		movie.character.list[charI] = 
-			{sprites: [img], currentSprite:0, spriteI:0, spriteChanges: [],
-				i:0, actions:[],
-				centerX: img.width / 2, 
-				centerY: img.height / 2,
-				"src":src};
+		drawCharacter(movie.character.list[charI], 
+				newCanvas.width / 2, newCanvas.height, newCanvas.getContext("2d"));
+
+		
 		if (template && template.src){
-			currentCharacter().spriteChanges = template.spriteChanges;
-			currentCharacter().actions = template.actions;
+			movie.character.list[charI].spriteChanges = template.spriteChanges;
+			movie.character.list[charI].actions = template.actions;
 		}
 
+	
 		var srcSearch = src.search("_1");
 		if (srcSearch > 0){
 			var getNextSprite = function(nextSprite){
@@ -759,7 +905,6 @@ function addCharacterFromFile(template){
 			};
 			getNextSprite(2);
 		}
-		makeCharacterButton(charI);
 	}
 }
 
@@ -777,39 +922,44 @@ function makeCharacterButton(n, img){
 	newCanvas.height = 80;
 	newCanvas.width = 60;
 	turnOnCharacter(movie.character.current);
-
-	drawCharacter(movie.character.list[n], newCanvas.width / 2, newCanvas.height, newCanvas.getContext("2d"));
+	return newCanvas;
 }
 
-function addSanta(){
-	addCharacterFromFile("img/santa_1.png");
-	addCharacterFromFile("img/elf_1.png");
-	document.getElementById("scene-script").value = 
-		"//draw the sky \nmovie.scene.context.fillStyle  = 'skyblue'" +
-	"\nmovie.scene.context.fillRect(0, 0, 800, 300)\n//draw the ground" +
-	"\nmovie.scene.context.fillStyle = 'white';\nmovie.scene.context.fillRect(0, 300, 800, 400)";
+function addLarry(){
+	addCharacterFromFile("img/larry/l_1.png");
 	setTheScene();
+}
 
-	
+function addDinos(){
+	addCharacterFromFile("img/dino/car.png");
+	addCharacterFromFile("img/dino/trex_1.png");
+	setTheScene();
 }
 
 function turnOffSprites(){
 	for (var ic = 0; ic < movie.character.list.length; ic++){
-		document.getElementById("sprite-canvas" + ic).parentElement.style.borderWidth = "0px";
-		document.getElementById("sprite-canvas" + ic).parentElement.style.margin = "8px";
+		var ooo = document.getElementById("sprite-canvas" + ic);
+		if (ooo){
+			ooo.parentElement.style.borderWidth = "0px";
+			ooo.parentElement.style.margin = "8px";
+		}
 	}
 }
 function turnOnSprite(ic){
-	turnOffSprites();
-	document.getElementById("sprite-canvas" + ic).parentElement.style.borderWidth = "8px";
-	document.getElementById("sprite-canvas" + ic).parentElement.style.margin = "0px";
+	var ooo = document.getElementById("sprite-canvas" + ic);
+	if (ooo){
+		turnOffSprites();
+		ooo.parentElement.style.borderWidth = "8px";
+		ooo.parentElement.style.margin = "0px";	
+	}
 }
 
 
 function turnOffCharacters(){
 	for (var ic = 0; ic < movie.character.list.length; ic++){
-		document.getElementById("char-canvas" + ic).parentElement.style.borderWidth = "0px";
-		document.getElementById("char-canvas" + ic).parentElement.style.margin = "8px";
+		var ooo = document.getElementById("char-canvas" + ic);
+		ooo.parentElement.style.borderWidth = "0px";
+		ooo.parentElement.style.margin = "8px";
 	}
 }
 function turnOnCharacter(ic){
@@ -824,8 +974,25 @@ function recallCharacter(n){
 	loadSprites(n);
 }
 
+function recallSound(n){
+	if (movie.scene.soundtrack.currentSound > -1){
+		var oo = document.getElementById("sound" + movie.scene.soundtrack.currentSound);
+		oo.style.borderWidth = "0px";
+		oo.style.margin = "8px";
+	}
+	var ooo = document.getElementById("sound" + n);
+	ooo.style.borderWidth = "8px";
+	ooo.style.margin = "0px";
+
+	movie.scene.soundtrack.currentSound = n;
+}
+
+
 function loadSprites(n){
 	document.getElementById("sprites").innerHTML = "Sprites for current character:";
+	if (!movie.character.list[n].sprites){
+		return;
+	}
 	for (var is = 0; is < movie.character.list[n].sprites.length; is++){
 		var newItem = document.createElement("div");
 		newItem.innerHTML = "<canvas onclick='setSprite(" + 
@@ -846,13 +1013,10 @@ function setSprite(n){
 	currentCharacter().spriteChanges[currentCharacter().spriteChanges.length] = [n, movie.scene.position - 1];
 	currentCharacter().spriteChanges.sort(function(a,b){return a[1]-b[1];})
 	currentCharacter().currentSprite = n;
-	if (movie.scene.paused || !movie.scene.animating){
-		animate();
-	}
 }
 
 function clearCharacterCanvas(){
-	movie.character.drawingCharacter = {paths:  []};
+	movie.character.drawingCharacter = {paths:  [], actions: []};
 	movie.character.canvas.getContext("2d").clearRect(0, 0, movie.character.canvas.width, movie.character.canvas.height);	
 }
 
@@ -869,13 +1033,35 @@ function setTheScene(){
 	}
 }
 
+function drawCharacterWithSelection(){
+
+	if (currentCharacter()){
+		var char = currentCharacter();
+		drawCharacter(char, 
+			movie.character.x, movie.character.y, movie.scene.context);		
+
+		if (char.sprites){
+			movie.scene.context.strokeRect(movie.character.x - char.centerX, 
+					movie.character.y - char.centerY, 
+				char.centerX * 2, char.centerY * 2);
+		}
+		else {
+
+		}
+	}
+
+}
+
 function drawCharacter(char, x, y, context){
 	if (char.sprites){
-		context.drawImage(char.sprites[char.currentSprite], x - char.centerX, y - char.centerY);
+		if (char.sprites[char.currentSprite]){
+			var img = char.sprites[char.currentSprite];
+			context.drawImage(img, x - img.width/2, y - img.height/2);			
+		}
 	}
 	else {
 		context.lineWidth = 6;
-
+		context.shadowBlur = 10;
 		for (var i = 0; i < char.paths.length; i++){
 			context.strokeStyle = movie.colors[char.paths[i].color];
 			context.beginPath();
@@ -890,33 +1076,48 @@ function drawCharacter(char, x, y, context){
 			context.closePath();
 			context.stroke();
 		}
+		context.shadowBlur = 0;
 	}
 }
 
 function drawCountIn(n){
 	movie.scene.context.font = "bold 18pt Arial Black";
+	movie.scene.context.shadowColor = "black";
+	movie.scene.context.shadowBlur = 10;
 	movie.scene.context.fillStyle = "black";
 	movie.scene.context.fillRect(0, 0, 75, 75);
 	movie.scene.context.fillStyle = "grey";
 	movie.scene.context.fillRect(0, 0, 75 * (Math.ceil(n) - n), 75);
 	movie.scene.context.fillStyle = "white";
 	movie.scene.context.fillText( Math.ceil(n), 30, 50);
+	movie.scene.context.shadowBlur = 0;
 }
+
+function drawLoading(){
+	var n = 0;
+	movie.scene.context.font = "bold 18pt Arial Black";
+	movie.scene.context.shadowColor = "black";
+	movie.scene.context.shadowBlur = 10;
+	movie.scene.context.fillStyle = "white";
+	movie.scene.context.fillRect(0, 0, movie.scene.canvas.width, movie.scene.canvas.height);
+	//movie.scene.context.fillStyle = "grey";
+	//movie.scene.context.fillRect(0, 0, 75 * (Math.ceil(n) - n), 75);
+	movie.scene.context.fillStyle = "black";
+	movie.scene.context.fillText("Loading...", 30, 50);
+	movie.scene.context.shadowBlur = 0;
+}
+
 
 function chooseColor(color){
 	var offs = 5;
 	if (movie.character.currentColor > -1){ 
 		var oldColor = document.getElementById("color-" + movie.character.currentColor);
 		oldColor.style.borderWidth = "1px";
-		//  var newLeft = oldColor.style.left + 3;
-		//  oldColor.style.left = newLeft + "px";
 		oldColor.style.borderColor = "#808080";
 		oldColor.style.zIndex = 0;
 	}
 	var newColor = document.getElementById("color-" + color);
 	newColor.style.borderWidth = "3px";
-	//  var newLeft2 = newColor.style.left - 3;
-	//  newColor.style.left = newLeft2;
 	newColor.style.borderColor = "#FFFFFF";
 	newColor.style.zIndex = 1;
 	movie.character.currentColor = color;
@@ -974,7 +1175,8 @@ function getJSON(){
 			src: movie.character.list[ic].src,
 			paths: movie.character.list[ic].paths};
 	}
-	mov.soundtrack = movie.scene.soundtrack;
+	mov.soundtrack = {sounds: movie.scene.soundtrack.sounds,
+		channels: movie.scene.soundtrack.channels};
 	return JSON.stringify(mov);
 }
 
@@ -985,7 +1187,13 @@ function loadString(s){
 	movie.scene.position = mov.length;
 	movie.character.list = [];
 	document.getElementById("character-list").innerHTML = "";
-	movie.scene.soundtrack = mov.soundtrack;
+	movie.scene.soundtrack.sounds = [];
+	if (mov.soundtrack.sounds){
+		for (var ic = 0; ic < mov.soundtrack.sounds.length; ic++){
+			addSoundFile(mov.soundtrack.sounds[ic]);
+		}
+	}
+	movie.scene.soundtrack.channels = mov.soundtrack.channels;
 	if (movie.audio){
 		loadAudio();
 	}
@@ -1011,11 +1219,16 @@ function loadAudio(){
 		var chan = makeChannel(ch.instrument);
 		chan.gain.gain.value = 0;
 		for (var icd = 0; icd < ch.data.length; icd++){
-			var freq = makeFreq(ch.data[icd][1]) ;
-			var panX = makePan(ch.data[icd][0]);
-			chan.osc.frequency.value = freq;
-			chan.panner.setPosition(panX, 0, 0);
-			chan.data[icd] = {"freq": freq, "pan":panX};
+			if (ch.data[icd][1] == -1){
+				chan.data[icd] = {"freq": -1, "pan": -1};
+			}
+			else {
+				var freq = makeFreq(ch.data[icd][1]) ;
+				var panX = makePan(ch.data[icd][0]);
+				chan.osc.frequency.value = freq;
+				chan.panner.setPosition(panX, 0, 0);
+				chan.data[icd] = {"freq": freq, "pan":panX};				
+			} 
 		}
 		movie.audio.channels[movie.audio.channels.length] = chan;
 		chan.recording = false;
@@ -1046,8 +1259,8 @@ function soundtrackButton(){
 	document.getElementById("soundtrack-button").style.backgroundColor = "white";
 	document.getElementById("soundtrack").style.display = "block";
 	if (!movie.audio){
-		document.getElementById("no-web-audio").style.visibility = "visible";
-		document.getElementById("soundtrack-instructions").style.visibility = "hidden";
+		document.getElementById("no-web-audio").style.display = "block";
+		document.getElementById("soundtrack-instructions").style.display = "none";
 	}
 }
 function shareButton(){
@@ -1076,7 +1289,8 @@ function showDrawCharactersButton(){
 }
 
 function playButton(){
-	if (movie.scene.animating){
+	movie.scene.soundtrack.fresh = true;
+	if (!movie.scene.paused){
 		pause();
 	}
 	else {
@@ -1125,6 +1339,28 @@ function addBackdrop(filename){
 		setTheScene();
 	}
 }
+
+function addSoundFile(template){
+	if (!template){
+		template = {"src": document.getElementById("sound-file").value, 
+			"data": []};
+	}
+	var aa = new Audio();
+	aa.src = template.src;
+	aa.load();
+	var ii = movie.scene.soundtrack.sounds.length;
+	movie.scene.soundtrack.sounds[ii] = template;
+	movie.scene.soundtrack.soundAudios[ii] = aa;
+
+	var newItem = document.createElement("div");
+	newItem.setAttribute("class", "sound");
+	newItem.setAttribute("id", "sound" + ii);
+	newItem.setAttribute("onclick", "recallSound(" + ii + ")");
+	newItem.style.backgroundImage = "url('img/sound.png')";
+	document.getElementById("sound-list").appendChild(newItem);
+	recallSound(ii);
+}
+
 
 function editButton(){
 	document.getElementById("area1").style.display = "block";
@@ -1183,7 +1419,6 @@ function makeChannel(color){
 	var chan = 	{};
 	var acontext = movie.audio.context;
 	chan.data = [];
-	chan.i = 0;
 	chan.muted = false;
 	chan.defaultGain = 0.4;
 	chan.osc = acontext.createOscillator();
@@ -1258,18 +1493,16 @@ function getInstrumentInfo(color){
 
 function chooseInstrument(color){
   var offs = 5;
+  movie.scene.soundtrack.currentSound = -1;
+  movie.scene.soundtrack.fresh = true;
   if (movie.scene.soundtrack.currentColor > -1){ 
   var oldColor = document.getElementById("inst-" + movie.scene.soundtrack.currentColor);
   oldColor.style.borderWidth = "1px";
-//  var newLeft = oldColor.style.left + 3;
-//  oldColor.style.left = newLeft + "px";
   oldColor.style.borderColor = "#808080";
   oldColor.style.zIndex = 0;
   }
   var newColor = document.getElementById("inst-" + color);
   newColor.style.borderWidth = "3px";
-//  var newLeft2 = newColor.style.left - 3;
-//  newColor.style.left = newLeft2;
   newColor.style.borderColor = "#FFFFFF";
   newColor.style.zIndex = 1;
   movie.scene.soundtrack.currentColor = color;
@@ -1333,6 +1566,23 @@ h1 {font-size:14pt; margin:-3px; text-align:center;}
 	border-radius:2px;
 }
 
+.sound {margin:8px; height:80px; width:60px; float:left;
+	border-width:0px;
+	border-color:#FF0000;
+	border-style:solid;
+	border-radius:5px;
+	background-position:center;
+	background-repeat:no-repeat;
+
+}
+#sound-list {height:96px; width:360px;
+	border-width:1px;
+	border-color:#000000;
+	border-style:solid;
+	border-radius:2px;
+}
+
+
 .sprite-canvas {height:100px; 
 	width:75px;
 	background-color:black;}
@@ -1370,7 +1620,7 @@ h1 {font-size:14pt; margin:-3px; text-align:center;}
 
 	
 .area, .step {display:none;
-	width:1000;
+/*	width:1000px;*/
 	border-width:1px;
 	border-color:#808080;
 	border-style:solid;
@@ -1380,10 +1630,8 @@ h1 {font-size:14pt; margin:-3px; text-align:center;}
 	position:relative;
 }
 
-
 #set-the-scene { display:none;}
 #dialog,#soundtrack,#share {display:none;}
-
 
 #draw-characters{position:absolute; top:80px; left:20px; width:250px; visibility:hidden;
 	border-width:1px;
@@ -1393,9 +1641,6 @@ h1 {font-size:14pt; margin:-3px; text-align:center;}
 	background-color:#DEDEDE;
 	padding:7px;
 }
-
-
-
 
 #file{position:absolute; top:39px; left:220px;}
 
@@ -1417,7 +1662,7 @@ h1 {font-size:14pt; margin:-3px; text-align:center;}
 .thin-black-border {border-width:1px; border-color:black; border-style:solid;}
 .hideme {display:none;}
 
-#no-web-audio {color:red; visibility:hidden; }
+#no-web-audio {color:red; display:none; width:200px;}
 #instruments {position:relative; height:40px;}
 .inst_box {
 	line-height:10px;font-size:8pt;text-align:center;position:absolute;
@@ -1431,7 +1676,10 @@ h1 {font-size:14pt; margin:-3px; text-align:center;}
 #inst-8{left:280px;top:0px;background-color:#800080;} #inst-9{left:315px;top:0px;background-color:#632DFF;}
 #inst-10{left:350px;top:0px;background-color:#63FF08;}
 
-#bymonadpad {position:absolute; right:5px; bottom:5px; font-size:9pt;}
+/*#bymonadpad {position:absolute; right:5px; bottom:5px; font-size:9pt;}*/
+#add-sound-by-file {
+border-color:black; border-style:solid;
+position:absolute; left:405px; top:45px; border-width:0px 0px 0px 1px; padding:10px;}
 
 #facebook_button {background-image:url('img/f_logo.png'); 
 	height:42px;width:42px;top:0px;left:35px;padding:0px;}
@@ -1442,10 +1690,9 @@ h1 {font-size:14pt; margin:-3px; text-align:center;}
 #sbuttons {padding:10px; margin:2px; height:45px; top:10px; position:relative;}
 .sbutton {padding:10px; margin:2px;position:absolute;
 	border-width:1px; border-radius:3px; border-color:black; border-style:solid;}
-
+#load-area {position:absolute; left:300px; top:120px;}
 </style>
 </head>
-
 
 
 
@@ -1454,158 +1701,165 @@ h1 {font-size:14pt; margin:-3px; text-align:center;}
 <h1 class="hideme">Doodlemation Studio (v0.6)</h1>
 
 <div id="scene-view" >
-<canvas class="thin-black-border" height="400" width="800" id="scene-canvas">
-</canvas>
-<br/>
-<canvas class="thin-black-border" height="30" width="800" id="scene-controls">
-</canvas>
+	<canvas class="thin-black-border" height="400" width="800" id="scene-canvas">
+	</canvas>
+	<br/>
+	<canvas class="thin-black-border" height="30" width="800" id="scene-controls">
+	</canvas>
 
-<div id="sprites" class="hideme">
-Sprites for<br/> current character:<br/>
-</div>
+	<div id="sprites" class="hideme">
+		Sprites for<br/> current character:<br/>
+	</div>
 
-<div id="after-show">
-<div id="replay-button" class="button" onclick="playButton()">
-Replay
-</div>
-<div id="make-new-button" class="button" onclick="window.location='moviemaker.htm'">
-	Make New
-</div>
-<div id="edit-button" class="button" onclick="editButton()">
-	Edit This
-</div>
-</div>
+	<div id="after-show">
+		<div id="replay-button" class="button" onclick="playButton()">
+		Replay
+		</div>
+		<div id="make-new-button" class="button" onclick="window.location='moviemaker.htm'">
+			Make New
+		</div>
+		<div id="edit-button" class="button" onclick="editButton()">
+			Edit This
+		</div>
+	</div>
 
 </div>
 
 <div id="area1" class="area" class="hideme">
-<div id="set-the-scene" >
-<b>Set the scene</b>
-<br/>
-
-<div >
-	Choose an image for the background
-	<br/><input id="backdrop-file" ></input>
-	<a href="javascript:void(0)" onclick="addBackdrop()">Use image</a>
-</div>
-<br/>
-<div id="set-the-scene-js">
-	Or Use JavaScript:
-	<br/>
-	<textarea id="scene-script">
+	<div id="set-the-scene" >
+		<b>Set the scene</b>
+		<br/>
+		<div >
+			Choose an image for the background
+			<br/><input id="backdrop-file" ></input>
+			<a href="javascript:void(0)" onclick="addBackdrop()">Use image</a>
+		</div>
+		<br/>
+		<div id="set-the-scene-js">
+			Or Use JavaScript:
+			<br/>
+			<textarea id="scene-script">
+//movie.scene.context.shadowBlur = 10;
 //draw the sky
 movie.scene.context.fillStyle  = "skyblue";
 movie.scene.context.fillRect(0, 0, 800, 300)
 //draw the ground
 movie.scene.context.fillStyle = "green";
 movie.scene.context.fillRect(0, 300, 800, 400)
-	</textarea>
-</div>
-</div>
+movie.scene.context.shadowBlur = 0;
+			</textarea>
+		</div>
+	</div>
 
+	<div id="characters" >
+		<b>Add characters</b><br/> 
+		From an image file (URL): 
+		<br/>
+		<input id="char-filename"></input>
+		<a href="javascript:void(0)" onclick="addCharacterFromFile()">add</a>
+		<br/>
+		<br/>Or <a href="javascript:void(0)" onclick="addLarry()">Try Larry!</a>
+		<br/>
+		<br/>Or <a href="javascript:void(0)" onclick="showDrawCharactersButton()">Draw Your Own Characters!</a>
 
-<div id="characters" >
-<b>Add characters</b><br/> 
-From an image file (URL): 
-<br/>
-<input id="char-filename"></input>
-<a href="javascript:void(0)" onclick="addCharacterFromFile()">add</a>
-<br/>
-<br/>Or <a href="javascript:void(0)" onclick="addSanta()">Try Santa and Elf!</a>
-<br/>
-<br/>Or <a href="javascript:void(0)" onclick="showDrawCharactersButton()">Draw Your Own Characters!</a>
+		<div id="character-list">
+		</div>
+		<br/><br/><br/>	
+		<b>Direct action</b> by selecting characters and drawing where to go  
+	</div>
 
-<div id="character-list">
-</div>
-<br/><br/><br/>	
-<b>Direct action</b> by selecting characters and drawing where to go  
+	<div id="dialog" >
+		<b>Add this text to the scene</b> 
+		<br/>
+		<input id="dialog-input"></input>
+		<div id="dialog-list">
+		</div>
+		<div id="dialog_instructions">
+			<b>Touch</b> WHEN and WHERE you want the text, and lift up when you want it to disappear.
+		</div>
+	</div>
 
-</div>
+	<div id="share" >
+		<div id="sbuttons">
+		<div id="facebook_button" class="sbutton" onClick="facebookButton()"></div>
+		<div id="twitter_button" class="sbutton" onClick="twitterButton()"></div>
+		<div id="email_button" class="sbutton" onClick="emailButton()"></div>
+		</div>
 
-<div id="dialog" >
-<b>Add this text to the scene</b> 
-<br/>
-	<input id="dialog-input"></input>
-<div id="dialog-list">
-</div>
-<div id="dialog_instructions"><b>Touch</b> WHEN and WHERE you want the text, and lift up when you want it to disappear.</div>
+		<b>link</b> to this movie</a>
+		<input id="new-animation-share"/>
+		<br/>
+		<br/>
+		The <b>JSON</b> for this movie</a>
+		<br/>
+		<textarea id="get-json"></textarea>
+		<div id="load-area">
+		<a href="javascript:void(0)" onclick="load()">
+		Load <b>JSON</b></a>
+		<br/>
+		<textarea id="load-json"></textarea>
+		</div>
+	</div>
 
-</div>
+	<div id="soundtrack" >
+		<b>Add sound to the scene</b> 
+		<br/>
+		Simply draw on the scene to create sounds.
+		<br/><br/>
+		Up and Down controls the pitch (frequency). <br/>Left and Right controls the stereo panning. 
 
+		<div id="no-web-audio">
+			Sorry, to "draw" sounds you need Web Audio API, which is currently supported by Chrome or Safari. 
+			You can still add existing sounds from a URL 
+		</div>
+		<div id="soundtrack-instructions">Draw multiple times for overdubs.
+			<br/>Different colors make different sounds.
+			<br/><br/>
+			<div id="instruments">
+				<div id="inst-0" class="inst_box" onClick="chooseInstrument(0)">sine<br/>soft<br/>delay</div>
+				<div id="inst-1" class="inst_box" onClick="chooseInstrument(1)">sine</div>
+				<div id="inst-2" class="inst_box" onClick="chooseInstrument(2)">sqr<br/>soft</div>
+				<div id="inst-3" class="inst_box" onClick="chooseInstrument(3)">sqr</div>
+				<div id="inst-4" class="inst_box" onClick="chooseInstrument(4)">sqr<br/>soft</div>
+				<div id="inst-5" class="inst_box" onClick="chooseInstrument(5)">sqr</div>
+				<div id="inst-6" class="inst_box" onClick="chooseInstrument(6)">sqr<br/>soft<br/>delay</div>
+				<div id="inst-7" class="inst_box" onClick="chooseInstrument(7)">saw<br/>soft</div>
+				<div id="inst-8" class="inst_box" onClick="chooseInstrument(8)">saw</div>
+				<div id="inst-9" class="inst_box" onClick="chooseInstrument(9)">saw<br/>soft<br/>delay</div>
+				<div id="inst-10" class="inst_box" onClick="chooseInstrument(10)">saw<br/>delay</div>
+			</div>
+			<div id="bymonadpad">
+				<a href="http://monadpad.com">monadpad.com</a> - 
+				<a href="http://cloudmusiccompany.appspot.com">Cloud Music Company</a>
+			</div>
+		</div>
 
-<div id="share" >
-<div id="sbuttons">
-<div id="facebook_button" class="sbutton" onClick="facebookButton()"></div>
-<div id="twitter_button" class="sbutton" onClick="twitterButton()"></div>
-<div id="email_button" class="sbutton" onClick="emailButton()"></div>
-</div>
+		<div id="add-sound-by-file">
+			Or add Sound by URL:<br/><input id="sound-file" ></input>
+			<a href="javascript:void(0)" onclick="addSoundFile()">Get Sound File</a>
+			<div id="sound-list">
+			</div>
+			Click on the scene when the sound should play
+		</div>
+	</div>
 
-<b>link</b> to this movie</a>
-<input id="new-animation-share"/>
-<br/>
-<br/>
-The <b>JSON</b> for this movie</a>
-<input id="get-json"/>
-<br/>
-<br/>
-<a href="javascript:void(0)" onclick="load()">
-Load <b>JSON</b></a>
-<input id="load-json"/>
-
-</div>
-
-<div id="soundtrack" >
-<br/>
-<b>Add sound to the scene</b> 
-<div id="no-web-audio">
-Sorry, but your Web Browser does not support Web Audio API. To hear sounds try Chrome or Safari.
-</div>
-<div id="soundtrack-instructions">Simply draw on the scene to make sounds. Draw multiple times for overdubs.
-<br/><br/>
-Up and Down controls the pitch (frequency) and Left and Right controls the stereo panning. Different colors make different sounds.
-<br/>
-<br/>
-<div id="instruments">
-<div id="inst-0" class="inst_box" onClick="chooseInstrument(0)">sine<br/>soft<br/>delay</div>
-<div id="inst-1" class="inst_box" onClick="chooseInstrument(1)">sine</div>
-<div id="inst-2" class="inst_box" onClick="chooseInstrument(2)">sqr<br/>soft</div>
-<div id="inst-3" class="inst_box" onClick="chooseInstrument(3)">sqr</div>
-<div id="inst-4" class="inst_box" onClick="chooseInstrument(4)">sqr<br/>soft</div>
-<div id="inst-5" class="inst_box" onClick="chooseInstrument(5)">sqr</div>
-<div id="inst-6" class="inst_box" onClick="chooseInstrument(6)">sqr<br/>soft<br/>delay</div>
-<div id="inst-7" class="inst_box" onClick="chooseInstrument(7)">saw<br/>soft</div>
-<div id="inst-8" class="inst_box" onClick="chooseInstrument(8)">saw</div>
-<div id="inst-9" class="inst_box" onClick="chooseInstrument(9)">saw<br/>soft<br/>delay</div>
-<div id="inst-10" class="inst_box" onClick="chooseInstrument(10)">saw<br/>delay</div>
-</div>
-<div id="bymonadpad">
-<a href="http://monadpad.com">monadpad.com</a> - <a href="http://cloudmusiccompany.appspot.com">Cloud Music Company</a>
-</div>
-</div>
-</div>
-
-
-
-
-<div class="area1controls">
-<div id="set-the-scene-button" class="button" onclick="setTheSceneButton()">
-	Scene
-</div>
-<div id="characters-button" style="background-color:white;" class="button" onclick="charactersButton()">
-	Characters
-</div>
-<div id="dialog-button" class="button" onclick="dialogButton()">
-	Dialog
-</div>
-<div id="soundtrack-button" class="button" onclick="soundtrackButton()">
-	Soundtrack
-</div>
-<div id="share-button" class="button" onclick="shareButton()">
-	Share
-</div>
-</div>
-
-
+	<div class="area1controls">
+		<div id="set-the-scene-button" class="button" onclick="setTheSceneButton()">
+			Scene
+		</div>
+		<div id="characters-button" style="background-color:white;" class="button" onclick="charactersButton()">
+			Characters
+		</div>
+		<div id="dialog-button" class="button" onclick="dialogButton()">
+			Dialog
+		</div>
+		<div id="soundtrack-button" class="button" onclick="soundtrackButton()">
+			Soundtrack
+		</div>
+		<div id="share-button" class="button" onclick="shareButton()">
+			Share
+		</div>
+	</div>
 
 </div>
 
@@ -1636,7 +1890,10 @@ Up and Down controls the pitch (frequency) and Left and Right controls the stere
 
 
 <!--context.translate(width, 0);
-context.scale(-1, 1);-->
+context.scale(-1, 1);
+music notes, continue channels
+
+-->
 </div>
 </body>
 </html>
