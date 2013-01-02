@@ -48,9 +48,10 @@ window.onload = function(){
 		}
 	};
 	characterCanvas.getContext("2d").lineWidth = 6;
+	characterCanvas.getContext("2d").lineJoin = "round"
 //	movie.scene.context.lineWidth = 6;
 	movie.scene.context.shadowColor = "black";
-
+	movie.scene.context.lineJoin = "round";
 	var tool = new tool_pencil();	
 	characterCanvas.addEventListener("mousedown", tool.mousedown, false);
 	characterCanvas.addEventListener("mousemove", tool.mousemove, false);
@@ -229,12 +230,21 @@ function tool_pencil2 () {
 	this.start = function(x, y){
 		tool.started = true;
 		if (movie.scene.mode == "CHARACTERS"){
-			movie.character.x = -1;
-			movie.character.y = -1;
 			if (!currentCharacter()){
 				tool.started = false;
 				return;
 			}
+			if (currentCharacter().actions && currentCharacter().actions.length > 0){
+				tool.offX = x - currentCharacter().actions[currentCharacter().i][0];
+				tool.offY = y - currentCharacter().actions[currentCharacter().i][1];
+			}
+			else {
+				tool.offX = 0;
+				tool.offY = 0;
+			}
+			movie.character.drawSelection = false;
+			movie.character.x = -1;
+			movie.character.y = -1;
 
 			var time = movie.scene.position;
 			movie.recordPastPlay = true;
@@ -252,7 +262,7 @@ function tool_pencil2 () {
 
 			var cuts = (currentCharacter().i < actions.length && 
 				actions[currentCharacter().i][2] < time) ? 1 : 0;
-			actions.splice(currentCharacter().i, cuts, [x, y, time]);			
+			actions.splice(currentCharacter().i, cuts, [x - tool.offX, y - tool.offY, time]);
 
 		}
 		else if (movie.scene.mode == "DIALOG"){
@@ -281,6 +291,9 @@ function tool_pencil2 () {
 				movie.character.x = x;
 				movie.character.y = y;
 			}
+			else {
+				movie.character.drawSelection = true;
+			}
 		}
 	}
 	this.mouseout = function (ev) {
@@ -289,6 +302,7 @@ function tool_pencil2 () {
 		tool.move(x, y);
 		movie.character.x = -1;
 		movie.character.y = -1;
+		movie.character.drawSelection = false;
 	}
 
 	this.move = function(x, y){
@@ -298,7 +312,7 @@ function tool_pencil2 () {
 				var time = (new Date).getTime() - tool.loopCounter;
 				var cuts = (currentCharacter().i+1 < actions.length && 
 					actions[currentCharacter().i+1][2] < time) ? 1 : 0;
-				actions.splice(currentCharacter().i+1, cuts, [x, y, time]);			
+				actions.splice(currentCharacter().i+1, cuts, [x - tool.offX, y - tool.offY, time]);			
 				currentCharacter().i++;
 			}
 			else if (movie.scene.mode == "DIALOG"){
@@ -551,6 +565,9 @@ function play(){
 			movie.character.list[ia].spriteI = 0;
 			movie.character.list[ia].currentSprite = 0;
 			turnOnSprite(0);
+			if (movie.character.list[ia].zoom){
+				movie.character.list[ia].zoom = 1;
+			}
 		}
 	}
 	for (var ia = 0; ia < movie.scene.soundtrack.channels.length; ia++){
@@ -629,9 +646,15 @@ function animate(){
 				var pxdata = char.actions;
 				while (char.sprites && char.spriteI < char.spriteChanges.length && 
 					char.spriteChanges[char.spriteI][1] <= nowInLoop){
-					char.currentSprite = char.spriteChanges[char.spriteI][0];
-					if (ic == movie.character.current){
-						turnOnSprite(char.currentSprite);
+					var newSprite = char.spriteChanges[char.spriteI][0];
+					if (newSprite == -2){
+						char.zoom = char.spriteChanges[char.spriteI][2];
+					}
+					else {
+						char.currentSprite = newSprite;
+						if (ic == movie.character.current){
+							turnOnSprite(char.currentSprite);
+						}
 					}
 					char.spriteI++;
 				}
@@ -639,6 +662,11 @@ function animate(){
 					while (char.i+1 < pxdata.length && pxdata[char.i+1][2] < nowInLoop){
 						char.i++;
 					}
+				}
+				if (movie.character.drawSelection && movie.character.current == ic
+					&& movie.scene.mode == "CHARACTERS"){
+					drawSelection(char, 
+						pxdata[char.i][0], pxdata[char.i][1], movie.scene.context);
 				}
 				drawCharacter(char, 
 					pxdata[char.i][0], pxdata[char.i][1], movie.scene.context);
@@ -862,7 +890,7 @@ function addCharacterFromFile(template){
 	}
 
 	turnOffCharacters();
-
+	clearSprites();
 	var charI = movie.character.list.length;
 	movie.character.current = charI;
 	movie.character.list[charI] = 
@@ -875,14 +903,18 @@ function addCharacterFromFile(template){
 
 	img.src = src;
 	img.onload = function(){
-		
+		if (movie.scene.mode == "CHARACTERS"){
+			document.getElementById("sprites").style.display = "block";	
+		}		
+
 		movie.character.list[charI].sprites = [img];
 		movie.character.list[charI].centerX = img.width / 2; 
 		movie.character.list[charI].centerY = img.height / 2;
 
 		drawCharacter(movie.character.list[charI], 
 				newCanvas.width / 2, newCanvas.height, newCanvas.getContext("2d"));
-
+		loadSprite(charI, 0);
+		turnOnSprite(0);
 		
 		if (template && template.src){
 			movie.character.list[charI].spriteChanges = template.spriteChanges;
@@ -898,7 +930,7 @@ function addCharacterFromFile(template){
 				img2.src = src2;
 				img2.onload = function(){
 					movie.character.list[charI].sprites[nextSprite - 1] = img2;
-					loadSprites(charI);
+					loadSprite(charI, nextSprite - 1);
 
 					getNextSprite(nextSprite + 1);
 				};
@@ -937,24 +969,57 @@ function addDinos(){
 }
 
 function turnOffSprites(){
-	for (var ic = 0; ic < movie.character.list.length; ic++){
-		var ooo = document.getElementById("sprite-canvas" + ic);
+	if (currentCharacter() && currentCharacter().sprites){
+		for (var ic = 0; ic < currentCharacter().sprites.length; ic++){
+			var ooo = document.getElementById("sprite-canvas" + ic);
+			if (ooo){
+				ooo.style.borderWidth = "0px";
+				ooo.style.margin = "8px";
+			}
+		}
+		var ooo = document.getElementById("visible-canvas");
 		if (ooo){
-			ooo.parentElement.style.borderWidth = "0px";
-			ooo.parentElement.style.margin = "8px";
+			ooo.style.borderWidth = "0px";
+			ooo.style.margin = "8px";
 		}
 	}
+
 }
 function turnOnSprite(ic){
-	var ooo = document.getElementById("sprite-canvas" + ic);
+	var ooo;
+	if (ic == -1){
+		ooo = document.getElementById("visible-canvas");
+	}
+	else {
+		ooo = document.getElementById("sprite-canvas" + ic);
+	}
 	if (ooo){
 		turnOffSprites();
-		ooo.parentElement.style.borderWidth = "8px";
-		ooo.parentElement.style.margin = "0px";	
+		ooo.style.borderWidth = "8px";
+		ooo.style.margin = "0px";	
 	}
 }
-
-
+function visibleCanvas(){
+	setSprite(-1);
+}
+function spriteSizeMinus(){
+	if (currentCharacter()){
+		if (!currentCharacter().zoom){
+			currentCharacter().zoom = 1;
+		}
+		currentCharacter().zoom = Math.max(0.01, currentCharacter().zoom - 0.05);
+		setSprite(-2);
+	}	
+}
+function spriteSizePlus(){
+	if (currentCharacter()){
+		if (!currentCharacter().zoom){
+			currentCharacter().zoom = 1;
+		}
+		currentCharacter().zoom = Math.min(4, currentCharacter().zoom + 0.05);
+		setSprite(-2);
+	}	
+}
 function turnOffCharacters(){
 	for (var ic = 0; ic < movie.character.list.length; ic++){
 		var ooo = document.getElementById("char-canvas" + ic);
@@ -987,32 +1052,51 @@ function recallSound(n){
 	movie.scene.soundtrack.currentSound = n;
 }
 
-
+function clearSprites(){
+	var asprite = document.getElementsByClassName("sprite");
+	while (asprite.length > 0){
+		asprite[0].parentElement.removeChild(asprite[0]);
+	}
+}
 function loadSprites(n){
-	document.getElementById("sprites").innerHTML = "Sprites for current character:";
+	clearSprites();
+
 	if (!movie.character.list[n].sprites){
 		return;
 	}
 	for (var is = 0; is < movie.character.list[n].sprites.length; is++){
-		var newItem = document.createElement("div");
-		newItem.innerHTML = "<canvas onclick='setSprite(" + 
-			is + ")' id='sprite-canvas" + is + 
-			"' class='sprite-canvas'></canvas>"; 
-		newItem.setAttribute("class", "sprite");
-		document.getElementById("sprites").appendChild(newItem);
-		document.getElementById("sprite-canvas" + is).getContext("2d").drawImage(
-			movie.character.list[n].sprites[is], 0, 0);
+		loadSprite(n, is);
 	}
 	if (currentCharacter() && currentCharacter().sprites){
 		turnOnSprite(currentCharacter().currentSprite);
 	}
 }
+function loadSprite(char, isprite){
+	if (char == movie.character.current){
+		var newItem = document.createElement("div");
+		newItem.innerHTML = "<canvas onclick='setSprite(" + 
+			isprite + ")' id='sprite-canvas" + isprite + 
+			"' class='sprite-canvas'></canvas>"; 
+		newItem.setAttribute("class", "sprite");
+		document.getElementById("sprites").appendChild(newItem);
+		document.getElementById("sprite-canvas" + isprite).getContext("2d").drawImage(
+			movie.character.list[char].sprites[isprite], 0, 0);
+	}
+}
 
 function setSprite(n){
-	turnOnSprite(n);
-	currentCharacter().spriteChanges[currentCharacter().spriteChanges.length] = [n, movie.scene.position - 1];
-	currentCharacter().spriteChanges.sort(function(a,b){return a[1]-b[1];})
-	currentCharacter().currentSprite = n;
+	if (currentCharacter() && currentCharacter().spriteChanges){
+		turnOnSprite(n);
+		var spriteChange = [n, movie.scene.position - 1];
+		if (n == -2){
+			spriteChange[2] = currentCharacter().zoom;
+		}
+		currentCharacter().spriteChanges[currentCharacter().spriteChanges.length] = spriteChange;
+		currentCharacter().spriteChanges.sort(function(a,b){return a[1]-b[1];})
+		if (n > -2){		
+			currentCharacter().currentSprite = n;
+		}
+	}
 }
 
 function clearCharacterCanvas(){
@@ -1041,6 +1125,8 @@ function drawCharacterWithSelection(){
 			movie.character.x, movie.character.y, movie.scene.context);		
 
 		if (char.sprites){
+			movie.scene.context.lineWidth = 1;
+			movie.scene.context.strokeStyle = "black";
 			movie.scene.context.strokeRect(movie.character.x - char.centerX, 
 					movie.character.y - char.centerY, 
 				char.centerX * 2, char.centerY * 2);
@@ -1049,14 +1135,30 @@ function drawCharacterWithSelection(){
 
 		}
 	}
+}
 
+function drawSelection(char, x, y, context) {
+	if (char.sprites && char.sprites[char.currentSprite]){
+
+		var img = char.sprites[char.currentSprite];
+		context.lineWidth = 1;
+		context.strokeStyle = "black";
+		context.strokeRect(x - img.width/2, y - img.height/2, 
+			img.width, img.height);
+	}
 }
 
 function drawCharacter(char, x, y, context){
 	if (char.sprites){
 		if (char.sprites[char.currentSprite]){
 			var img = char.sprites[char.currentSprite];
-			context.drawImage(img, x - img.width/2, y - img.height/2);			
+			if (char.zoom){
+				context.drawImage(img, x - img.width/2, y - img.height/2, 
+					img.width * char.zoom, img.height * char.zoom);			
+			}
+			else {
+				context.drawImage(img, x - img.width/2, y - img.height/2);										
+			}
 		}
 	}
 	else {
@@ -1070,8 +1172,8 @@ function drawCharacter(char, x, y, context){
 			for (var j = 1; j < char.paths[i].pxdata.length; j++){
 				context.lineTo(char.paths[i].pxdata[j][0] + x - movie.character.centerX, 
 						char.paths[i].pxdata[j][1] + y - movie.character.centerY);
-				context.moveTo(char.paths[i].pxdata[j][0] + x - movie.character.centerX, 
-						char.paths[i].pxdata[j][1] + y - movie.character.centerY);
+//				context.moveTo(char.paths[i].pxdata[j][0] + x - movie.character.centerX, 
+//						char.paths[i].pxdata[j][1] + y - movie.character.centerY);
 			}
 			context.closePath();
 			context.stroke();
@@ -1240,6 +1342,9 @@ function charactersButton(){
 	turnOffButtons();
 	document.getElementById("characters-button").style.backgroundColor = "white";
 	document.getElementById("characters").style.display = "block";
+	if (currentCharacter()){
+		document.getElementById("sprites").style.display = "block";
+	}
 }
 function setTheSceneButton(){
 	movie.scene.mode = "SCENE";
@@ -1305,25 +1410,28 @@ function playButton(){
 }
 
 function save(){
-	var json = getJSON();
 
-	document.getElementById("get-json").value = json;
+	if (movie.scene.length > 0){
+		var json = getJSON();
 
-	var xhr = new XMLHttpRequest();
-	xhr.open("POST", "/a", true);
-	xhr.onreadystatechange = function(){
-		if (xhr.readyState == 4){
+		document.getElementById("get-json").value = json;
 
-			var id = xhr.responseText;
-			if (id != "bad"){
-				document.getElementById("new-animation-share").value = "http://yougotadoodle.appspot.com/moviemaker.htm?id=" + id;
-//				movie.id = id;
+		var xhr = new XMLHttpRequest();
+		xhr.open("POST", "/a", true);
+		xhr.onreadystatechange = function(){
+			if (xhr.readyState == 4){
+
+				var id = xhr.responseText;
+				if (id != "bad"){
+					document.getElementById("new-animation-share").value = "http://yougotadoodle.appspot.com/moviemaker.htm?id=" + id;
+	//				movie.id = id;
+				}
 			}
 		}
+		xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+		var params = "json=" + json;		
+		xhr.send(params);
 	}
-	xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-	var params = "json=" + json;		
-	xhr.send(params);
 }
 
 function addBackdrop(filename){
@@ -1364,7 +1472,9 @@ function addSoundFile(template){
 
 function editButton(){
 	document.getElementById("area1").style.display = "block";
-	document.getElementById("sprites").style.display = "block";
+	if (currentCharacter()){
+		document.getElementById("sprites").style.display = "block";
+	}
 	movie.scene.mode = "CHARACTERS";
 	document.getElementById("after-show").style.visibility = "hidden";
 }
@@ -1582,16 +1692,51 @@ h1 {font-size:14pt; margin:-3px; text-align:center;}
 	border-radius:2px;
 }
 
+#sprite-size {width:100%; height:20px; position:relative;}
+#sprite-size-minus {height:20px; width:50%;
+	background-color:#AAAAAA;
+	margin:0px; 
+	border-width:0px;
+	border-style:solid;
+	border-color:#FFFF00;
+	border-radius:2px;
+}
+#sprite-size-plus {height:20px; width:50%;
+	background-color:#999999;
+	margin:0px; 
+	border-width:0px;
+	border-style:solid;
+	border-color:#FF0000;
+	border-radius:2px;
+	position:absolute;
+	left:50%;
+	top:0px;
 
-.sprite-canvas {height:100px; 
-	width:75px;
-	background-color:black;}
-.sprite {margin:8px; height:100px; width:75px; 
-	border-width:1px;
+}
+
+#visible-sprite {height:36px; margin:0px;}
+
+#visible-canvas {height:20px; width:75px;
+	background-color:black;
+	color:white;
+	align:center;
+	margin:8px; 
+	border-width:0px;
 	border-style:solid;
 	border-color:#FF0000;
 	border-radius:5px;
 }
+.sprite-canvas {height:100px; 
+	width:75px;
+	background-color:black;
+	margin:8px; 
+	border-width:0px;
+	border-style:solid;
+	border-color:#FF0000;
+	border-radius:5px;
+}
+
+.sprite {margin:0px; padding:0px; height:116px;}
 
 #scene-canvas {height:400px; 
 	width:800px;
@@ -1645,7 +1790,7 @@ h1 {font-size:14pt; margin:-3px; text-align:center;}
 #file{position:absolute; top:39px; left:220px;}
 
 #scene-view {position:relative;}
-#sprites {position:absolute; left:810px; top:5px; }
+#sprites {text-align:center; position:absolute; left:810px; top:5px; margin:0px; padding:0px;}
 
 .area1controls {position:absolute; right:2px; top:2px; 
 	}
@@ -1691,6 +1836,7 @@ position:absolute; left:405px; top:45px; border-width:0px 0px 0px 1px; padding:1
 .sbutton {padding:10px; margin:2px;position:absolute;
 	border-width:1px; border-radius:3px; border-color:black; border-style:solid;}
 #load-area {position:absolute; left:300px; top:120px;}
+#new-animation-share {width:350px;}
 </style>
 </head>
 
@@ -1708,7 +1854,15 @@ position:absolute; left:405px; top:45px; border-width:0px 0px 0px 1px; padding:1
 	</canvas>
 
 	<div id="sprites" class="hideme">
-		Sprites for<br/> current character:<br/>
+		Character Sprites:
+		<div id="sprite-size">
+			<div id="sprite-size-minus" onclick="spriteSizeMinus()">-</div>
+			<div id="sprite-size-plus" onclick="spriteSizePlus()">+</div>
+		</div>
+		<div id="visible-sprite">
+			<canvas id="visible-canvas" onclick="visibleCanvas()">hide
+			</canvas>
+		</div>
 	</div>
 
 	<div id="after-show">
