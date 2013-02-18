@@ -1042,6 +1042,9 @@ function addCharacter(template){
 	var ic = movie.character.list.length;
 	if (template){
 		movie.character.list[ic] = template;
+		if (!template.actions){
+			template.actions = [];
+		}
 	}
 	else {
 		movie.character.list[ic] = movie.character.drawingCharacter;
@@ -1067,6 +1070,14 @@ function addCharacterFromFile(template){
 	if (template){
 		if (template.src){
 			src = template.src;			
+			if (!template.actions){
+				template.actions = [];
+			}
+			if (!template.spriteI){
+				template.spriteI = 0;
+			}
+			if (!template.spriteChanges)
+				template.spriteChanges = [];
 		}
 		else {
 			src = template;
@@ -1383,8 +1394,9 @@ function drawCharacter(char, x, y, context){
 //				context.moveTo(char.paths[i].pxdata[j][0] + x - movie.character.centerX, 
 //						char.paths[i].pxdata[j][1] + y - movie.character.centerY);
 			}
-			context.closePath();
 			context.stroke();
+			context.closePath();
+			
 		}
 		context.shadowBlur = 0;
 	}
@@ -1498,7 +1510,9 @@ function loadString(s){
 	loadObject(mov);
 }
 function loadObject(mov){
+	var mode = movie.scene.mode;
 	movie = getFreshScene();
+	movie.scene.mode = mode;
 	movie.scene.length = mov.length;
 	movie.scene.position = mov.length;
 	movie.character.list = [];
@@ -2061,4 +2075,113 @@ function clearLists(){
 	document.getElementById("embed-json").value = "";
 	document.getElementById("new-animation-share").value = "";
 
+}
+
+function openProject(){
+	   //try{
+				var xhr = new XMLHttpRequest();
+			xhr.open("GET", "/ahelp?type=Animations&userid=" + userid, true);
+			xhr.onreadystatechange = function(){
+				if (xhr.readyState == 4){
+					var resp = xhr.responseText;
+					if (resp != "bad"){
+						document.getElementById("dialog-title").innerHTML = "Open a Saved Project";
+						var dialog = document.getElementById("chooser-dialog");
+						var list = document.getElementById("chooser-dialog-list");
+						list.innerHTML = "";
+						var movies = JSON.parse(resp);
+						for (var i = 0; i < movies.length; i++){
+							var newDiv = document.createElement("div");
+							newDiv.className = "saved-project";
+							newDiv.innerHTML = "ID: " + movies[i].id;
+							var obj = movies[i].o;
+							newDiv.onclick = (function (obj, id) {
+									return function() {
+										loadObject(obj);
+										movie.id = id; 
+										dialog.style.display = "none";
+									};
+							})(obj, movies[i].id);
+							list.appendChild(newDiv);
+						}
+						dialog.style.display = "block";
+					}
+				}
+			}
+			xhr.send(); 
+		 //  }
+		   //catch (excp) {}
+	
+	//document.getElementById("dialog-chooser")
+	
+}
+
+function saveCharacter(){
+	if (currentCharacter()){
+//	   try{
+			var xhr = new XMLHttpRequest();
+			xhr.open("POST", "/ahelp", true);
+			xhr.onreadystatechange = function(){
+				if (xhr.readyState == 4){
+					var id = xhr.responseText;
+					if (id != "bad"){
+					    currentCharacter().id = id;
+					}
+				}
+			}
+			xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+			var json = JSON.stringify({src: currentCharacter().src,
+				   paths: currentCharacter().paths}); 
+			var params = "type=Character&userid=" + userid + 
+					"&json=" + encodeURIComponent(json);
+			xhr.send(params);
+//		   } catch (excp) {}
+   }
+}
+
+function openCharacters(){
+	   //try{
+				var xhr = new XMLHttpRequest();
+			xhr.open("GET", "/ahelp?type=Character&userid=" + userid, true);
+			xhr.onreadystatechange = function(){
+				if (xhr.readyState == 4){
+					var resp = xhr.responseText;
+					if (resp != "bad"){
+						document.getElementById("dialog-title").innerHTML = "Open a Saved Character";
+						var dialog = document.getElementById("chooser-dialog");
+						var list = document.getElementById("chooser-dialog-list");
+						list.innerHTML = "";
+						var movies = JSON.parse(resp);
+						for (var i = 0; i < movies.length; i++){
+							var obj = movies[i].o;
+							var newDiv = document.createElement("canvas");
+							newDiv.className = "saved-character";
+							//newDiv.innerHTML = "ID: " + movies[i].id;
+							newDiv.height = 80;
+							newDiv.width = 60;
+							if (obj.paths){
+								drawCharacter(obj, newDiv.width / 2, newDiv.height, 
+										newDiv.getContext("2d"));								
+							}
+
+							newDiv.onclick = (function (obj, id) {
+									return function() {
+										if (obj.src){
+											addCharacterFromFile(obj);
+										}
+										else {
+											addCharacter(obj);
+										}
+										dialog.style.display = "none";
+									};
+							})(obj, movies[i].id);
+							list.appendChild(newDiv);
+						}
+						dialog.style.display = "block";
+					}
+				}
+			}
+			xhr.send(); 
+		 //  }
+		   //catch (excp) {}
 }
