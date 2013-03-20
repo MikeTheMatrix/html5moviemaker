@@ -115,6 +115,8 @@ h1 {font-size:14pt; margin:-3px; text-align:center;}
 #scene-script {height:98px; 
 	width:480px;
 }
+#scene-drag {position:absolute; left:680px; top:150px;}
+
 
 .color_box {
 	line-height:10px;
@@ -224,12 +226,13 @@ position:absolute; left:405px; top:45px; border-width:0px 0px 0px 1px; padding:1
 	background-color:#FFFFFF; height:42px;width:42px;top:0px;left:82px;padding:0px;}
 #email_button {background-image:url('img/email.png');
 	background-color:#FF80FF; height:42px;width:42px;top:0px;left:128px;padding:0px;}
-#sbuttons {padding:10px; margin:2px; height:45px; top:10px; position:relative;}
+#sbuttons {padding:10px; margin:2px; height:45px; top:4px; left:255px; position:absolute;}
 .sbutton {padding:10px; margin:2px;position:absolute;
 	border-width:1px; border-radius:3px; border-color:black; border-style:solid;}
-#load-area {position:absolute; left:500px; top:120px;}
-#embed-area {position:absolute; left:200px; top:120px;}
+#load-area {position:absolute; left:500px; top:117px;}
+#embed-area {position:absolute; left:200px; top:117px;}
 #new-animation-share {width:350px;}
+#movie-title {width: 250px;}
 
 #toolbar {position:absolute;
 	left:0px;
@@ -240,6 +243,7 @@ position:absolute; left:405px; top:45px; border-width:0px 0px 0px 1px; padding:1
 #direct-action-hint {text-align:center;}
 .hint {background-color:#FFD633;}
 #save-character {position:absolute; top:150px; right:20px;}
+#drop-character {position:absolute; top:10px; left:270px;}
 
 #chooser-dialog-close-button {position:absolute; bottom:15px; right:15px;}
 
@@ -310,6 +314,9 @@ movie.scene.context.fillRect(0, 300, 800, 400)
 movie.scene.context.shadowBlur = 0;
 			</textarea>
 		</div>
+		<div id="scene-drag">
+			Or Drag an Image Here
+      </div>
 	</div>
 
 	<div id="characters" >
@@ -323,7 +330,7 @@ movie.scene.context.shadowBlur = 0;
 		<br/>
 		<br/>Or <a href="javascript:void(0)" onclick="openCharacters()">Open a Saved Character</a>
 		<br/>
-		<br/>Or <a href="javascript:void(0)" onclick="addLarry()">Try Larry!</a>
+		<br/>Or <a href="javascript:void(0)" onclick="addDinos()">Try T-Rex!</a>
 
 		<div id="character-list">
 		</div>
@@ -334,6 +341,10 @@ movie.scene.context.shadowBlur = 0;
 			<a href="javascript:void(0)" onclick="saveCharacter()">
 			Save Current Character</a>
 		</div>
+		<div id="drop-character">
+			Or Drop an Image Here
+		</div>
+
 		
 	</div>
 
@@ -352,12 +363,17 @@ movie.scene.context.shadowBlur = 0;
 	</div>
 
 	<div id="share" >
+		<b>Movie Title</b> 
+		<br/>
+		<input id="movie-title"> 
+	    
 		<div id="sbuttons">
 		<div id="facebook_button" class="sbutton" onClick="facebookButton()"></div>
 		<div id="twitter_button" class="sbutton" onClick="twitterButton()"></div>
 		<div id="email_button" class="sbutton" onClick="emailButton()"></div>
 		</div>
 
+		<br/><br/>
 		<b>link</b> to this movie
 		<input id="new-animation-share"/>
 		<br/>

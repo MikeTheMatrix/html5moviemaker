@@ -1,10 +1,7 @@
 var movie;
-var userid;
-window.onload = function(){
 
-	//is this an exsting user?
-	userStuff();
-		
+window.onload = function(){
+	
 	var characterCanvas = document.getElementById("character-canvas");
 	var sceneCanvas = document.getElementById("scene-canvas");
 	var controlsCanvas = document.getElementById("scene-controls");
@@ -13,6 +10,8 @@ window.onload = function(){
 	if (controlsCanvas){
 		controlsContext = controlsCanvas.getContext("2d");		
 	}
+
+	// should try to eliminate dependences on this canvas, but need it
 	if (!characterCanvas){
 		characterCanvas = document.createElement("canvas");
 		var div1 = document.createElement("div");
@@ -24,9 +23,11 @@ window.onload = function(){
 		characterCanvas.height = 200;
 	}
 		
+	// the html5 movie maker app
 	movie = getFreshScene();
 
-
+	movie.currentUser = userStuff();
+	
 	//	movie.scene.context.lineWidth = 6;
 	movie.scene.context.shadowColor = "black";
 	movie.scene.context.lineJoin = "round";
@@ -62,6 +63,9 @@ window.onload = function(){
 		controlsCanvas.addEventListener("touchend",   tool3.touchend, false);		
 	}
 
+	if (document.getElementById("movie-title")){
+		document.getElementById("movie-title").onblur = save;
+	}
 
 	movie.speak = window.location.search.search("speak=true") > -1;
 
@@ -108,6 +112,13 @@ window.onload = function(){
 			editButton();
 		}
 	}
+
+   if (document.getElementById("set-the-scene")){
+      document.getElementById("set-the-scene").ondrop = dropSceneBackground;
+   }
+   if (document.getElementById("characters")){
+      document.getElementById("characters").ondrop = dropCharacter;
+   }
 
 	animate();
 }
@@ -262,7 +273,7 @@ function tool_pencil2 () {
 				movie.character.list[movie.character.current].actions = actions;
 			}
 
-			tool.loopCounter = (new Date).getTime() - time;
+			tool.loopCounter = Date.now() - time;
 
 			var cuts = (currentCharacter().i < actions.length && 
 				actions[currentCharacter().i][2] < time) ? 1 : 0;
@@ -275,7 +286,7 @@ function tool_pencil2 () {
 			if (movie.scene.paused){
 				resume();
 			}
-			tool.loopCounter = (new Date).getTime() - time;
+			tool.loopCounter = Date.now() - time;
 			var text = document.getElementById("dialog-input").value;
 			tool.dialog = {"text": text, data: [[x, y, time]], i: 0};
 			movie.scene.dialog.list[movie.scene.dialog.list.length] = tool.dialog;
@@ -318,14 +329,14 @@ function tool_pencil2 () {
 		if (tool.started) {
 			if (movie.scene.mode == "CHARACTERS"){
 				var actions = movie.character.list[movie.character.current].actions;
-				var time = (new Date).getTime() - tool.loopCounter;
+				var time = Date.now() - tool.loopCounter;
 				var cuts = (currentCharacter().i+1 < actions.length && 
 					actions[currentCharacter().i+1][2] < time) ? 1 : 0;
 				actions.splice(currentCharacter().i+1, cuts, [x - tool.offX, y - tool.offY, time]);			
 				currentCharacter().i++;
 			}
 			else if (movie.scene.mode == "DIALOG"){
-				tool.dialog.data[tool.dialog.data.length] = [x, y, (new Date).getTime() - tool.loopCounter];
+				tool.dialog.data[tool.dialog.data.length] = [x, y, Date.now() - tool.loopCounter];
 			}
 			else if (movie.scene.mode == "SOUNDTRACK"){
 				soundtrackTouchMove(x, y, tool);
@@ -361,7 +372,7 @@ function tool_pencil2 () {
 				tool.drawnPaths++;
 			}
 			else if (movie.scene.mode == "DIALOG"){
-				tool.dialog.data[tool.dialog.data.length] = [-1, -1, (new Date).getTime() - tool.loopCounter];
+				tool.dialog.data[tool.dialog.data.length] = [-1, -1, Date.now() - tool.loopCounter];
 				movie.recordPastPlay = false;
 				setTimeout(function(){
 					if (movie.scene.paused){
@@ -386,7 +397,7 @@ function soundtrackStartTouch(x, y, tool){
 	if (movie.scene.paused){
 		resume();
 	}
-	tool.loopCounter = (new Date).getTime() - time;
+	tool.loopCounter = Date.now() - time;
 	if (strack.currentSound > -1){
 		strack.sounds[strack.currentSound].data[strack.sounds[strack.currentSound].data.length] =
 			[time, -1];
@@ -426,7 +437,7 @@ function soundtrackStartTouch(x, y, tool){
 			}
 		}
 	}
-	tool.t = (new Date).getTime();
+	tool.t = Date.now();
 }
 function soundtrackTouchMove(x, y, tool){
 	if (movie.scene.soundtrack.currentSound > -1){
@@ -439,20 +450,20 @@ function soundtrackTouchMove(x, y, tool){
 			tool.audioChan.panner.setPosition(panX, 0, 0);
 			tool.audioChan.data[tool.audioChan.data.length] = {"freq": freq, "pan":panX};
 		}
-		tool.channel.data[tool.channel.data.length] = [x, y, (new Date).getTime() - tool.loopCounter];
+		tool.channel.data[tool.channel.data.length] = [x, y, Date.now() - tool.loopCounter];
 	}
 }
 function soundtrackTouchEnd(tool){
 	var strack = movie.scene.soundtrack;
 	if (strack.currentSound > -1){
-		var clickTime = (new Date).getTime() - tool.t;		
+		var clickTime = Date.now() - tool.t;		
 		if (clickTime < 125){
 			movie.scene.length = Math.max(movie.scene.length, 
 					movie.scene.position + (strack.soundAudios[strack.currentSound].duration * 1000));
 		}
 		else {
 			strack.sounds[strack.currentSound].data[strack.sounds[strack.currentSound].data.length - 1][1] =
-				(new Date).getTime() - tool.loopCounter;
+				Date.now() - tool.loopCounter;
 			strack.soundAudios[strack.currentSound].pause();
 		}
 	}
@@ -462,12 +473,15 @@ function soundtrackTouchEnd(tool){
 			tool.audioChan.data[tool.audioChan.data.length] = {"freq": -1, "pan": -1};
 			tool.audioChan.recording = false;
 		}
-		tool.channel.data[tool.channel.data.length] = [-1, -1, (new Date).getTime() - tool.loopCounter];
+		tool.channel.data[tool.channel.data.length] = [-1, -1, Date.now() - tool.loopCounter];
 	}
 	movie.recordPastPlay = false;
 	setTimeout(function(){
 		if (movie.scene.paused){
 			playButton();
+		}
+		else {
+			//TODO may have to add this to playList
 		}
 	}, 20);
 }
@@ -480,7 +494,7 @@ function videoStartTouch(x, y, tool){
 	if (movie.scene.paused){
 		resume();
 	}
-	tool.loopCounter = (new Date).getTime() - time;
+	tool.loopCounter = Date.now() - time;
 	if (vid.current > -1){
 		var vData = vid.list[vid.current].data;
 		tool.i = vData.length;
@@ -493,14 +507,14 @@ function videoStartTouch(x, y, tool){
 		el.j = vData.length - 1;
 		el.play();
 	}
-	tool.t = (new Date).getTime();
+	tool.t = Date.now();
 }
 function videoTouchMove(x, y, tool){
 	var vid = movie.scene.video;
 	if (vid.current > -1){
 		var vData = vid.list[vid.current].data;
 		vData[tool.i][vData[tool.i].length] =
-			[x, y, (new Date).getTime() - tool.loopCounter];
+			[x, y, Date.now() - tool.loopCounter];
 		var el = vid.elements[vid.current];		
 		el.style.left = (x - el.clientWidth/2) + "px";		
 		el.style.top = (y - el.clientHeight/2) + "px";
@@ -509,19 +523,19 @@ function videoTouchMove(x, y, tool){
 function videoTouchEnd(tool){
 	var vid = movie.scene.video;
 	if (vid.current > -1){
-		var clickTime = (new Date).getTime() - tool.t;
+		var clickTime = Date.now() - tool.t;
 		var vData = vid.list[vid.current].data;
 		if (clickTime < 125){
 			movie.scene.length = Math.max(movie.scene.length, 
 					movie.scene.position + (vid.elements[vid.current].duration * 1000));
 			vData[tool.i][vData[tool.i].length] =
 				[-1, -1, 
-				((new Date).getTime() - tool.loopCounter) + 
+				(Date.now() - tool.loopCounter) + 
 				(vid.elements[vid.current].duration - vid.elements[vid.current].currentTime) * 1000];
 		}
 		else {
 			vData[tool.i][vData[tool.i].length] =
-				[-1, -1, (new Date).getTime() - tool.loopCounter];
+				[-1, -1, Date.now() - tool.loopCounter];
 			vid.elements[vid.current].pause();
 			vid.elements[vid.current].style.visibility = "hidden";
 		}
@@ -530,6 +544,9 @@ function videoTouchEnd(tool){
 	setTimeout(function(){
 		if (movie.scene.paused){
 			playButton();
+		}
+		else {
+			//TODO may have to add this to play list
 		}
 	}, 20);
 }
@@ -599,7 +616,7 @@ function tool_pencil3 () {
 			var newPosition = x - movie.controls.playButtonWidth;
 			newPosition = newPosition / (movie.controls.canvas.clientWidth - (movie.controls.playButtonWidth * 2));
 			newPosition = Math.round(newPosition * movie.scene.length);
-			movie.scene.started = (new Date).getTime() - newPosition;
+			movie.scene.started = Date.now() - newPosition;
 			movie.scene.position = newPosition;
 			movie.updateIs = true;
 		}
@@ -610,7 +627,7 @@ function tool_pencil3 () {
 			var newPosition = x - movie.controls.playButtonWidth;
 			newPosition = newPosition / (movie.controls.canvas.clientWidth - (movie.controls.playButtonWidth * 2));
 			newPosition = Math.round(newPosition * movie.scene.length);
-			movie.scene.started = (new Date).getTime() - newPosition;
+			movie.scene.started = Date.now() - newPosition;
 			movie.scene.position = newPosition;
 			movie.updateIs = true;
 			movie.scene.soundtrack.fresh = true;
@@ -632,7 +649,7 @@ function tool_pencil3 () {
 				var newPosition = x - movie.controls.playButtonWidth;
 				newPosition = newPosition / (movie.controls.canvas.clientWidth - (movie.controls.playButtonWidth * 2));
 				newPosition = Math.round(newPosition * movie.scene.length);
-				movie.scene.started = (new Date).getTime() - newPosition;
+				movie.scene.started = Date.now() - newPosition;
 				movie.scene.position = newPosition;
 				movie.updateIs = true;
 				movie.scene.paused = tool.wasPaused;
@@ -660,14 +677,20 @@ function play(){
 		movie.scene.soundtrack.channels[ia].i = 0;
 	}
 	movie.scene.soundtrack.playList = [];
+	movie.scene.soundtrack.playingSounds = [];
 	for (var is = 0; is < movie.scene.soundtrack.sounds.length; is++){
 		if (movie.scene.soundtrack.soundAudios[is].currentTime > 0){
 			movie.scene.soundtrack.soundAudios[is].currentTime = 0;
 		}
 		for (var iis = 0; iis < movie.scene.soundtrack.sounds[is].data.length; iis++){
-			movie.scene.soundtrack.playList[movie.scene.soundtrack.playList.length] = {"sound": is, 
-				"start": movie.scene.soundtrack.sounds[is].data[iis][0], 
-				"stop": movie.scene.soundtrack.sounds[is].data[iis][1]};
+			var osound = {"sound": is, 
+					"start": movie.scene.soundtrack.sounds[is].data[iis][0], 
+					"stop": movie.scene.soundtrack.sounds[is].data[iis][1]};
+			if (osound.stop == -1){
+				osound.stop = osound.start + 
+				      (movie.scene.soundtrack.soundAudios[is].duration * 1000);  
+			}
+			movie.scene.soundtrack.playList[movie.scene.soundtrack.playList.length] = osound; 
 		}
 	}
 	movie.scene.soundtrack.playList.sort(function(a,b){return a.start - b.start});
@@ -693,11 +716,11 @@ function play(){
 
 	movie.scene.dialog.showingList = [];
 	movie.scene.dialog.i = 0;
-	movie.scene.started = (new Date).getTime() + 3000;
+	movie.scene.started = Date.now() + 3000;
 	movie.scene.paused = false;
 }
 function resume(){
-	movie.scene.started = (new Date).getTime() - movie.scene.position;
+	movie.scene.started = Date.now() - movie.scene.position;
 	movie.scene.paused = false;
 	movie.scene.soundtrack.fresh = true;
 }
@@ -713,7 +736,7 @@ function animate(){
 		nowInLoop = movie.scene.position;
 	}
 	else {
-		nowInLoop = (new Date).getTime() - movie.scene.started;
+		nowInLoop = Date.now() - movie.scene.started;
 		movie.scene.position = nowInLoop;
 	}
 
@@ -744,6 +767,7 @@ function animate(){
 			for (var ia = 0; ia < movie.scene.soundtrack.channels.length; ia++){
 				movie.scene.soundtrack.channels[ia].i = 0;
 			}
+			movie.scene.soundtrack.soundI = 0;
 			movie.updateIs = false;
 		}
 		for (var ic = 0; ic < movie.character.list.length; ic++){
@@ -837,12 +861,14 @@ function updateAudioChannels(nowInLoop){
 		var aa = strack.soundAudios[strack.playList[strack.soundI].sound];
 		var makePlay = function(){
 			if (aa.readyState == 4){
-				aa.started = strack.playList[strack.soundI].start;
-				aa.currentTime = 0;
-				aa.play();
-				strack.playingSounds[strack.playingSounds.length] = {"audio": aa, 
-						"start": strack.playList[strack.soundI].start,
-						"stop": strack.playList[strack.soundI].stop};
+				if (nowInLoop < strack.playList[strack.soundI].stop){
+					aa.started = strack.playList[strack.soundI].start;
+					aa.currentTime = (nowInLoop - aa.started) / 1000;
+					aa.play();
+					strack.playingSounds[strack.playingSounds.length] = {"audio": aa, 
+							"start": strack.playList[strack.soundI].start,
+							"stop": strack.playList[strack.soundI].stop};
+				}
 				strack.soundI++;				
 			}
 			else {
@@ -1485,7 +1511,8 @@ function getTheCode(){
 }
 
 function getJSON(){
-	var mov = {length: movie.scene.length, characters: [], 
+	var mov = {title: document.getElementById("movie-title").value,
+			length: movie.scene.length, characters: [], 
 			scene: document.getElementById("scene-script").value,
 			dialog: movie.scene.dialog};
 	if (movie.scene.backdrop){
@@ -1512,6 +1539,9 @@ function loadString(s){
 function loadObject(mov){
 	var mode = movie.scene.mode;
 	movie = getFreshScene();
+	movie.scene.title = mov.title ? mov.title : "";
+	if (document.getElementById("movie-title"))
+		document.getElementById("movie-title").value = movie.scene.title;
 	movie.scene.mode = mode;
 	movie.scene.length = mov.length;
 	movie.scene.position = mov.length;
@@ -1701,7 +1731,7 @@ function save(){
 		}
 		xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
 		
-		var params = "json=" + encodeURIComponent(json) + "&userid=" + userid;
+		var params = "json=" + encodeURIComponent(json) + "&userid=" + movie.currentUser;
 		if (movie.id != -1){
 			params += "&id=" + movie.id;
 		}
@@ -1964,7 +1994,7 @@ for (i=0;i<ARRcookies.length;i++)
 }
 
 function userStuff(){
-   userid = getCookie("userid");
+   var userid = getCookie("userid");
    if (userid !=null && userid !=""){
 	   //open last movie?
 	   return userid;
@@ -1989,6 +2019,7 @@ function userStuff(){
 	   }
 	   catch (excp) {}
    }
+   return userid;
 }
 
 function setCookie(c_name,value,exdays)
@@ -2004,7 +2035,9 @@ function getFreshScene(){
 	var sceneCanvas = document.getElementById("scene-canvas");
 	var controlsCanvas = document.getElementById("scene-controls");
 	
+	var userid = (movie && movie.currentUser) ? movie.currentUser : -1;
 	var mov = {id: -1,
+			currentUser: userid,
 			changed: true,
 			loading: false,
 			colors: ["#FFFFFF", "#808080", "#FF0000", "#FFFF00", 
@@ -2014,7 +2047,9 @@ function getFreshScene(){
 			controls: {playButtonWidth: 40, 
 				  canvas: controlsCanvas,
 				  context: controlsCanvas.getContext("2d")},
-			scene: {length: 0,
+			scene: {title: "",
+			  datetime: Date.now(),	
+			  length: 0,
 			  position: 0,
 			  dialog: {list: [], showingList: [], i: 0},
 			  soundtrack: {sounds: [], soundAudios: [], playingSounds: [], 
@@ -2063,8 +2098,10 @@ function getFreshScene(){
 }
 
 function newProject(){
+	var mode = movie.scene.mode;
 	movie = getFreshScene();
 	clearLists();
+	movie.scene.mode = mode;
 }
 
 function clearLists(){
@@ -2080,7 +2117,7 @@ function clearLists(){
 function openProject(){
 	   //try{
 				var xhr = new XMLHttpRequest();
-			xhr.open("GET", "/ahelp?type=Animations&userid=" + userid, true);
+			xhr.open("GET", "/ahelp?type=Animations&userid=" + movie.currentUser, true);
 			xhr.onreadystatechange = function(){
 				if (xhr.readyState == 4){
 					var resp = xhr.responseText;
@@ -2093,13 +2130,15 @@ function openProject(){
 						for (var i = 0; i < movies.length; i++){
 							var newDiv = document.createElement("div");
 							newDiv.className = "saved-project";
-							newDiv.innerHTML = "ID: " + movies[i].id;
+							newDiv.innerHTML = movies[i].title + 
+								   "<br/>ID: " + movies[i].id;
 							var obj = movies[i].o;
 							newDiv.onclick = (function (obj, id) {
 									return function() {
 										loadObject(obj);
 										movie.id = id; 
 										dialog.style.display = "none";
+										playButton();
 									};
 							})(obj, movies[i].id);
 							list.appendChild(newDiv);
@@ -2132,7 +2171,7 @@ function saveCharacter(){
 			xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
 			var json = JSON.stringify({src: currentCharacter().src,
 				   paths: currentCharacter().paths}); 
-			var params = "type=Character&userid=" + userid + 
+			var params = "type=Character&userid=" + movie.currentUser + 
 					"&json=" + encodeURIComponent(json);
 			xhr.send(params);
 //		   } catch (excp) {}
@@ -2142,7 +2181,7 @@ function saveCharacter(){
 function openCharacters(){
 	   //try{
 				var xhr = new XMLHttpRequest();
-			xhr.open("GET", "/ahelp?type=Character&userid=" + userid, true);
+			xhr.open("GET", "/ahelp?type=Character&userid=" + movie.currentUser, true);
 			xhr.onreadystatechange = function(){
 				if (xhr.readyState == 4){
 					var resp = xhr.responseText;
@@ -2184,4 +2223,17 @@ function openCharacters(){
 			xhr.send(); 
 		 //  }
 		   //catch (excp) {}
+}
+
+function dropSceneBackground(e){
+    e.preventDefault();
+    e.dataTransfer.items[0].getAsString(function(url){
+        addBackdrop(url);
+    });
+}
+function dropCharacter(e){
+    e.preventDefault();
+    e.dataTransfer.items[0].getAsString(function(url){
+        addCharacterFromFile(url);
+    });
 }
